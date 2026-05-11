@@ -1,0 +1,22 @@
+{
+  "name": "boutididact-bff",
+  "version": "2.0.0",
+  "description": "Backend-for-Frontend BOUTIDIDACT : pont sécurisé Hiboutik API + impression ESC/POS pour borne tactile",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test:health": "node -e \"require('http').get('http://localhost:3001/api/health', r => r.on('data', d => process.stdout.write(d)))\""
+  },
+  "keywords": ["hiboutik", "pos", "kiosk", "borne", "escpos", "thermal-printer"],
+  "author": "BOUTIDIDACT",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "node-thermal-printer": "^4.6.0"
+  }
+}

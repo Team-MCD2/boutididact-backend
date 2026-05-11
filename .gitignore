@@ -1,0 +1,41 @@
+# Backend BOUTIDIDACT - Gitignore spécifique Node.js
+
+# Dépendances
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+bff.log
+server.log
+
+# Fichiers de configuration avec secrets
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Tests
+coverage/
+.nyc_output/
+
+# Cache
+.cache/
+.parcel-cache/

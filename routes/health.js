@@ -1,0 +1,42 @@
+/**
+ * /api/health : état détaillé du BFF (Hiboutik + imprimante).
+ *  Utilisé par la borne pour afficher un voyant "Système OK".
+ */
+const express = require('express');
+const hiboutik = require('../services/hiboutik');
+const printer = require('../services/printer');
+const config = require('../config/env');
+
+const router = express.Router();
+
+router.get('/', async (req, res) => {
+  const [hiboutikStatus, printerOnline] = await Promise.all([
+    hiboutik.ping(),
+    printer.checkOnline(),
+  ]);
+
+  const ok = hiboutikStatus.ok && printerOnline;
+
+  res.status(ok ? 200 : 207).json({
+    ok,
+    timestamp: new Date().toISOString(),
+    hiboutik: {
+      configured: hiboutik.isConfigured(),
+      reachable: hiboutikStatus.ok,
+      reason: hiboutikStatus.reason ?? null,
+      account: config.hiboutik.account || null,
+    },
+    printer: {
+      ip: config.printer.ip,
+      port: config.printer.port,
+      online: printerOnline,
+    },
+    shop: {
+      name: config.shop.name,
+      siret: config.shop.siret || null,
+    },
+    fallback: { offlineAllowed: config.allowOfflineFallback },
+  });
+});
+
+module.exports = router;
