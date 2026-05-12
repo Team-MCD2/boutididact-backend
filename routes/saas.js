@@ -31,20 +31,32 @@ const buildTransporter = () => {
 };
 const transporter = buildTransporter();
 
-// Recherche d'une boutique par nom (insensible à la casse)
+// Recherche d'une boutique par nom (insensible à la casse).
+// Stripe Search est éventuellement consistant : on retry une fois si vide.
 async function findShopByName(stripe, boutiqueName) {
   if (!boutiqueName) return null;
   const lower = boutiqueName.toLowerCase().replace(/'/g, "\\'");
-  try {
-    const res = await stripe.customers.search({
-      query: `metadata['boutiqueNameLower']:'${lower}'`,
-      limit: 1,
-    });
-    return res.data[0] || null;
-  } catch (e) {
-    console.error('[saas] findShopByName:', e.message);
-    return null;
-  }
+  const query = `metadata['boutiqueNameLower']:'${lower}'`;
+
+  const trySearch = async () => {
+    try {
+      const res = await stripe.customers.search({ query, limit: 1 });
+      return res.data[0] || null;
+    } catch (e) {
+      console.error('[saas] findShopByName error:', e.message);
+      return null;
+    }
+  };
+
+  let found = await trySearch();
+  if (found) return found;
+
+  // Retry rapide (consistance éventuelle de l'index Stripe Search)
+  await new Promise(r => setTimeout(r, 600));
+  found = await trySearch();
+  if (found) return found;
+
+  return null;
 }
 
 async function findShopByEmail(stripe, email) {
