@@ -41,11 +41,37 @@ router.post('/stripe-checkout', async (req, res) => {
   }
 
   const { boutiqueName, boutiqueEmail, boutiquePassword } = req.body;
+  if (!boutiqueEmail) return res.status(400).json({ error: 'missing_email' });
+
   const stripe = new Stripe(stripeKey);
   try {
+    // 1. Vérifier par Email
+    const existingCustomers = await stripe.customers.list({ email: boutiqueEmail, limit: 1 });
+    if (existingCustomers.data.length > 0) {
+      return res.status(400).json({ 
+        error: 'email_already_exists', 
+        message: 'Cet email est déjà associé à un compte BOUTIDIDACT. Veuillez utiliser la connexion ou un autre email.' 
+      });
+    }
+
+    // 2. Vérifier par Nom de boutique (via recherche dans les métadonnées)
+    if (boutiqueName) {
+      const boutiqueSearch = await stripe.customers.search({
+        query: `metadata['boutiqueName']:'${boutiqueName}'`,
+        limit: 1
+      });
+      if (boutiqueSearch.data.length > 0) {
+        return res.status(400).json({ 
+          error: 'boutique_already_exists', 
+          message: `Le nom de boutique "${boutiqueName}" est déjà utilisé. Veuillez en choisir un autre.` 
+        });
+      }
+    }
+
     const origin = req.headers.origin || `http://localhost:${config.port}`;
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
+      customer_email: boutiqueEmail, // Pré-remplir l'email
       line_items: [
         {
           price_data: {
@@ -154,9 +180,9 @@ router.get('/verify-subscription', async (req, res) => {
         boutique: session.metadata
       }));
 
-      // Envoyer l'email de notification à l'admin
+      // 1. Envoyer l'email de notification à l'admin
       if (process.env.ADMIN_EMAIL_RECEIVER && process.env.SMTP_USER) {
-        const mailOptions = {
+        const adminMailOptions = {
           from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
           to: process.env.ADMIN_EMAIL_RECEIVER,
           subject: '🔔 NOUVEAU CLIENT BOUTIDIDACT',
@@ -165,7 +191,30 @@ router.get('/verify-subscription', async (req, res) => {
                 `Email Boutique : ${session.metadata.boutiqueEmail}\n` +
                 `Veuillez générer ses accès Hiboutik et lui envoyer par mail.`,
         };
-        transporter.sendMail(mailOptions).catch(e => console.error('Erreur envoi mail notification:', e));
+        transporter.sendMail(adminMailOptions).catch(e => console.error('Erreur envoi mail notification admin:', e));
+      }
+
+      // 2. Envoyer l'email de bienvenue au client
+      if (session.metadata.boutiqueEmail && process.env.SMTP_USER) {
+        const clientMailOptions = {
+          from: `"BOUTIDIDACT Team" <${process.env.SMTP_USER}>`,
+          to: session.metadata.boutiqueEmail,
+          subject: '🚀 Bienvenue chez BOUTIDIDACT !',
+          html: `
+            <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+              <h2 style="color: #4f46e5;">Bienvenue, ${session.metadata.boutiqueName} !</h2>
+              <p>Votre abonnement a été activé avec succès. Nous sommes ravis de vous compter parmi nous.</p>
+              <p><strong>Prochaines étapes :</strong></p>
+              <ol>
+                <li>Nos équipes préparent vos accès API Hiboutik personnalisés.</li>
+                <li>Vous recevrez un second e-mail d'ici quelques heures avec vos identifiants de connexion.</li>
+                <li>Une fois reçus, rendez-vous dans l'onglet <strong>Paramètres</strong> de votre borne pour les configurer.</li>
+              </ol>
+              <p>À très vite,<br>L'équipe BOUTIDIDACT</p>
+            </div>
+          `,
+        };
+        transporter.sendMail(clientMailOptions).catch(e => console.error('Erreur envoi mail bienvenue client:', e));
       }
       
       res.json({ status: 'premium', customer: session.customer });
