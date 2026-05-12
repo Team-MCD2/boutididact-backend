@@ -313,47 +313,108 @@ router.post('/delete-account', async (req, res) => {
 });
 
 // ============================================================
-// IA MENU EXTRACTION
+// IA MENU EXTRACTION (Gemini -> fallback Groq Llama Vision)
 // ============================================================
-router.post('/extract-menu', async (req, res) => {
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (!geminiKey) {
-    return res.status(501).json({ error: 'gemini_not_configured', message: 'Clé Gemini manquante sur le serveur.' });
-  }
+const axios = require('axios');
 
+const EXTRACT_PROMPT = `Voici une photo d'un menu de restaurant.
+Extrais tous les plats, boissons, et menus avec leurs prix.
+Renvoie UNIQUEMENT le résultat STRICTEMENT au format JSON. Ne mets aucun texte avant ou après.
+Le format attendu est un tableau d'objets avec ces clés exactes :
+"name" (nom du produit), "price" (prix en nombre, ex: 12.5), "category" (catégorie du produit), "desc" (description).`;
+
+const parseProductsJson = (text) => {
+  const cleaned = String(text || '')
+    .replace(/```json\n?/gi, '')
+    .replace(/```\n?/g, '')
+    .trim();
+  // Tente d'extraire le bloc JSON si du texte parasite subsiste
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  const slice = (start >= 0 && end > start) ? cleaned.slice(start, end + 1) : cleaned;
+  return JSON.parse(slice);
+};
+
+async function extractWithGemini({ imageBase64, mimeType }) {
+  const key = (process.env.GEMINI_API_KEY || '').trim();
+  if (!key) throw new Error('Clé Gemini absente.');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+  const payload = {
+    contents: [{
+      parts: [
+        { text: EXTRACT_PROMPT },
+        { inline_data: { mime_type: mimeType, data: imageBase64.split(',')[1] || imageBase64 } },
+      ],
+    }],
+  };
+  const { data } = await axios.post(url, payload, { timeout: 25_000 });
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  return parseProductsJson(text);
+}
+
+async function extractWithGroq({ imageBase64, mimeType }) {
+  const key = (process.env.GROQ_API_KEY || '').trim();
+  if (!key) throw new Error('Clé Groq absente.');
+  const dataUrl = imageBase64.startsWith('data:')
+    ? imageBase64
+    : `data:${mimeType};base64,${imageBase64}`;
+  const payload = {
+    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: EXTRACT_PROMPT },
+        { type: 'image_url', image_url: { url: dataUrl } },
+      ],
+    }],
+    temperature: 0.1,
+    response_format: { type: 'json_object' },
+  };
+  const { data } = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    payload,
+    { timeout: 25_000, headers: { Authorization: `Bearer ${key}` } },
+  );
+  let text = data?.choices?.[0]?.message?.content || '';
   try {
-    const { imageBase64, mimeType } = req.body;
-    if (!imageBase64 || !mimeType) return res.status(400).json({ error: 'missing_data' });
-
-    const prompt = `Voici une photo d'un menu de restaurant.
-    Extrais tous les plats, boissons, et menus avec leurs prix.
-    Renvoie UNIQUEMENT le résultat STRICTEMENT au format JSON. Ne mets aucun texte avant ou après.
-    Le format attendu est un tableau d'objets avec ces clés exactes :
-    "name" (nom du produit), "price" (prix en nombre, ex: 12.5), "category" (catégorie du produit), "desc" (description).`;
-
-    const axios = require('axios');
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${geminiKey.trim()}`;
-    const payload = {
-      contents: [{
-        parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mimeType, data: imageBase64.split(',')[1] || imageBase64 } }
-        ]
-      }]
-    };
-    const response = await axios.post(url, payload);
-    const text = response.data.candidates[0].content.parts[0].text;
-    const cleanedText = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const products = JSON.parse(cleanedText);
-    res.json({ products });
-  } catch (error) {
-    console.error('Erreur Gemini Detail:', error.response?.data || error.message);
-    const apiError = error.response?.data?.error;
-    res.status(500).json({
-      error: 'internal_error',
-      message: apiError ? `${apiError.status}: ${apiError.message}` : error.message
-    });
+    return parseProductsJson(text);
+  } catch {
+    // Groq peut emballer le tableau dans un objet ({ "products": [...] }) à cause de response_format json_object
+    const obj = JSON.parse(text);
+    if (Array.isArray(obj)) return obj;
+    for (const v of Object.values(obj || {})) {
+      if (Array.isArray(v)) return v;
+    }
+    throw new Error('Réponse Groq sans tableau JSON exploitable.');
   }
+}
+
+router.post('/extract-menu', async (req, res) => {
+  const { imageBase64, mimeType } = req.body || {};
+  if (!imageBase64 || !mimeType) {
+    return res.status(400).json({ error: 'missing_data', message: 'Image manquante.' });
+  }
+
+  const errors = [];
+  for (const provider of [
+    { name: 'gemini', fn: extractWithGemini },
+    { name: 'groq', fn: extractWithGroq },
+  ]) {
+    try {
+      const products = await provider.fn({ imageBase64, mimeType });
+      if (!Array.isArray(products)) throw new Error('Réponse non-tableau.');
+      return res.json({ products, provider: provider.name });
+    } catch (e) {
+      const detail = e.response?.data?.error?.message || e.response?.data?.error || e.message;
+      console.error(`[extract-menu] ${provider.name} KO:`, detail);
+      errors.push(`${provider.name}: ${detail}`);
+    }
+  }
+
+  res.status(502).json({
+    error: 'all_providers_failed',
+    message: `Aucun fournisseur IA n'a répondu. (${errors.join(' | ')})`,
+  });
 });
 
 module.exports = router;

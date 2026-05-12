@@ -15,6 +15,9 @@
 const axios = require('axios');
 const config = require('../config/env');
 
+// Cache mémoire des size_id par product_id (reset via reload())
+const sizeCache = new Map();
+
 const buildClient = (overrides = null) => {
   const account = overrides?.account || config.hiboutik.account;
   const user = overrides?.user || config.hiboutik.user;
