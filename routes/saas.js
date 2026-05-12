@@ -20,13 +20,17 @@ const router = express.Router();
 const PREMIUM_FILE = path.join(__dirname, '../../.premium_status');
 
 // Helper pour savoir si on est premium
-const isPremium = () => {
-  return fs.existsSync(PREMIUM_FILE);
+const isPremium = (req) => {
+  // Sur Vercel (Sans DB), on considère premium si le client envoie ses propres clés Hiboutik
+  // OU si le fichier local existe (legacy/dev)
+  const hasLocalFile = fs.existsSync(PREMIUM_FILE);
+  const hasClientKeys = req?.hiboutikAuth?.account && req?.hiboutikAuth?.apiKey;
+  return hasLocalFile || !!hasClientKeys;
 };
 
 // ---- STATUS ----
 router.get('/status', (req, res) => {
-  res.json({ isPremium: isPremium() });
+  res.json({ isPremium: isPremium(req) });
 });
 
 // ---- STRIPE ----
@@ -74,7 +78,7 @@ router.post('/stripe-checkout', async (req, res) => {
 // ---- IA MENU EXTRACTION ----
 router.post('/extract-menu', async (req, res) => {
   // Sécurité Serveur : Vérifier l'abonnement
-  if (!isPremium()) {
+  if (!isPremium(req)) {
     return res.status(403).json({ error: 'premium_required', message: 'Cette fonctionnalité nécessite un abonnement actif.' });
   }
 
