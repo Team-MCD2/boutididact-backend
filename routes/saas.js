@@ -250,6 +250,63 @@ router.post('/login', async (req, res) => {
 });
 
 // ============================================================
+// DELETE ACCOUNT : supprime la boutique (annule abonnement + delete Customer)
+// ============================================================
+router.post('/delete-account', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) {
+    return res.status(501).json({ error: 'stripe_not_configured', message: 'Service indisponible.' });
+  }
+
+  const { shopName, password } = req.body || {};
+  if (!shopName || !password) {
+    return res.status(400).json({ error: 'missing_credentials', message: 'Nom de boutique et mot de passe requis.' });
+  }
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer || !customer.metadata || customer.metadata.boutiquePassword !== password) {
+      return res.status(401).json({ error: 'invalid_credentials', message: 'Nom de boutique ou mot de passe invalide.' });
+    }
+
+    // 1) Annuler toutes les souscriptions actives du customer
+    try {
+      const subs = await stripe.subscriptions.list({ customer: customer.id, status: 'all', limit: 10 });
+      for (const sub of subs.data) {
+        if (['active', 'trialing', 'past_due', 'unpaid', 'incomplete'].includes(sub.status)) {
+          await stripe.subscriptions.cancel(sub.id).catch(e => console.error('[saas] cancel sub:', e.message));
+        }
+      }
+    } catch (e) {
+      console.error('[saas] list subs:', e.message);
+    }
+
+    // 2) Supprimer le Customer Stripe (élimine définitivement la "boutique")
+    const customerEmail = customer.metadata.boutiqueEmail || customer.email || '';
+    const boutiqueName = customer.metadata.boutiqueName || shopName;
+    await stripe.customers.del(customer.id);
+
+    // 3) Notifier admin
+    if (transporter && process.env.ADMIN_EMAIL_RECEIVER) {
+      transporter.sendMail({
+        from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
+        to: process.env.ADMIN_EMAIL_RECEIVER,
+        subject: '🗑️ SUPPRESSION COMPTE BOUTIDIDACT',
+        text: `Une boutique vient d'être supprimée.\n\n` +
+              `Nom Boutique : ${boutiqueName}\n` +
+              `Email : ${customerEmail}\n\n` +
+              `→ Pensez à supprimer le compte Hiboutik associé.`,
+      }).catch(e => console.error('[saas] mail admin delete:', e.message));
+    }
+
+    res.json({ ok: true, message: 'Boutique supprimée.' });
+  } catch (error) {
+    console.error('[saas] delete-account:', error.message);
+    res.status(500).json({ error: 'internal_error', message: error.message });
+  }
+});
+
+// ============================================================
 // IA MENU EXTRACTION
 // ============================================================
 router.post('/extract-menu', async (req, res) => {
