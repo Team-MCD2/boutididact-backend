@@ -76,11 +76,34 @@ router.post('/', async (req, res) => {
   let saleId = null;
   const warnings = [];
   let stage = null;
+  const idMapping = {}; // localId -> hiboutikId (renvoyé au frontend pour mise à jour localStorage)
 
   // ---- 1-4 : Hiboutik ----
   const useHiboutik = !skipHiboutik && hiboutik.isConfigured(req.hiboutikAuth);
   if (useHiboutik) {
     try {
+      // 0. Pré-provisionne dans Hiboutik les produits "locaux" (IDs non numériques type "local-xxx")
+      stage = 'provision_local_products';
+      let fallbackCategoryId = null;
+      for (const it of items) {
+        const rawId = it.productId ?? it.id;
+        const numericId = Number(rawId);
+        if (!Number.isFinite(numericId) || numericId <= 0) {
+          if (!fallbackCategoryId) {
+            fallbackCategoryId = await hiboutik.getFallbackCategoryId(req.hiboutikAuth);
+          }
+          const hbId = await hiboutik.createProduct({
+            name: it.name || 'Produit',
+            price: Number(it.price),
+            categoryId: fallbackCategoryId,
+          }, req.hiboutikAuth);
+          idMapping[rawId] = hbId;
+          it._resolvedProductId = hbId;
+        } else {
+          it._resolvedProductId = numericId;
+        }
+      }
+
       stage = 'create';
       const created = await hiboutik.createSale({ vendorId, storeId, customerId }, req.hiboutikAuth);
       saleId = created.saleId;
@@ -88,7 +111,7 @@ router.post('/', async (req, res) => {
       stage = 'add_items';
       for (const it of items) {
         await hiboutik.addItem(saleId, {
-          productId: Number(it.productId ?? it.id),
+          productId: it._resolvedProductId,
           quantity: Number(it.quantity),
           price: Number(it.price)
         }, req.hiboutikAuth);
@@ -137,6 +160,7 @@ router.post('/', async (req, res) => {
       printed: false,
       warnings: [...warnings, { code: 'printer_offline', message: 'Imprimante injoignable.' }],
       total: totalRounded,
+      idMapping,
     });
   }
 
@@ -163,6 +187,7 @@ router.post('/', async (req, res) => {
       printed: false,
       warnings: [...warnings, { code: 'print_failed', message: e.message }],
       total: totalRounded,
+      idMapping,
     });
   }
 
@@ -173,6 +198,7 @@ router.post('/', async (req, res) => {
     printed: true,
     warnings,
     total: totalRounded,
+    idMapping,
   });
 });
 

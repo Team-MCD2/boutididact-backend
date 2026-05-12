@@ -166,6 +166,39 @@ const getProductImageBinary = async (productId, auth = null) => {
   return { contentType: r.headers['content-type'] || 'image/jpeg', buffer: Buffer.from(r.data) };
 };
 
+// Crée un produit Hiboutik (utilisé pour matérialiser les produits locaux IA/CRUD au moment du checkout).
+const createProduct = async ({ name, price, categoryId, vatRate = 20 }, auth = null) => {
+  const client = buildClient(auth);
+  if (!client) throw new Error('Hiboutik non configuré');
+  const payload = {
+    product_model: String(name || 'Produit').slice(0, 90),
+    product_price: Number(price).toFixed(2),
+    product_category: Number(categoryId),
+    product_vat: Number(vatRate),
+    product_stock_management: 0,
+  };
+  try {
+    const { data } = await client.post('/products', payload);
+    const productId = data?.product_id ?? data?.id ?? data?.[0]?.product_id;
+    if (!productId) throw new Error('product_id absent dans réponse Hiboutik');
+    return Number(productId);
+  } catch (e) {
+    const f = formatError(e);
+    const err = new Error(`Création produit "${name}" : ${f.message}`);
+    err.hiboutik = f;
+    throw err;
+  }
+};
+
+// Renvoie l'ID d'une catégorie utilisable (la 1re catégorie active du compte Hiboutik).
+const getFallbackCategoryId = async (auth = null) => {
+  const cats = await getCategories(auth);
+  const first = Array.isArray(cats) ? cats[0] : null;
+  const id = Number(first?.category_id ?? first?.id);
+  if (!id) throw new Error('Aucune catégorie Hiboutik disponible (créez-en une dans Hiboutik).');
+  return id;
+};
+
 const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' }, auth = null) => {
   const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
@@ -282,6 +315,8 @@ module.exports = {
   getPaymentTypes,
   getProductImages,
   getProductImageBinary,
+  createProduct,
+  getFallbackCategoryId,
   createSale,
   addItem,
   recordPayment,
