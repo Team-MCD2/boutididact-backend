@@ -60,19 +60,12 @@ router.post('/', async (req, res) => {
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'empty_cart', message: 'Le panier est vide.' });
   }
+  // ... (validation logic stays the same)
   for (const it of items) {
-    if (!it || typeof it !== 'object') {
-      return res.status(400).json({ error: 'invalid_item' });
-    }
-    if (!it.productId && !it.id) {
-      return res.status(400).json({ error: 'missing_product_id', item: it });
-    }
-    if (!Number.isFinite(Number(it.price)) || Number(it.price) < 0) {
-      return res.status(400).json({ error: 'invalid_price', item: it });
-    }
-    if (!Number.isInteger(Number(it.quantity)) || Number(it.quantity) <= 0) {
-      return res.status(400).json({ error: 'invalid_quantity', item: it });
-    }
+    if (!it || typeof it !== 'object') return res.status(400).json({ error: 'invalid_item' });
+    if (!it.productId && !it.id) return res.status(400).json({ error: 'missing_product_id', item: it });
+    if (!Number.isFinite(Number(it.price)) || Number(it.price) < 0) return res.status(400).json({ error: 'invalid_price', item: it });
+    if (!Number.isInteger(Number(it.quantity)) || Number(it.quantity) <= 0) return res.status(400).json({ error: 'invalid_quantity', item: it });
   }
 
   const total = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
@@ -85,39 +78,30 @@ router.post('/', async (req, res) => {
   let stage = null;
 
   // ---- 1-4 : Hiboutik ----
-  const useHiboutik = !skipHiboutik && hiboutik.isConfigured();
+  const useHiboutik = !skipHiboutik && hiboutik.isConfigured(req.hiboutikAuth);
   if (useHiboutik) {
     try {
-      // 1. Création
       stage = 'create';
-      const created = await hiboutik.createSale({ vendorId, storeId, customerId });
+      const created = await hiboutik.createSale({ vendorId, storeId, customerId }, req.hiboutikAuth);
       saleId = created.saleId;
 
-      // 2. Ajout des items
       stage = 'add_items';
       for (const it of items) {
-        // Hiboutik ajoute par "quantity" mais addItem ajoute UN appel par produit
-        // (ESC les lignes seront groupées par product_id automatiquement côté Hiboutik).
         await hiboutik.addItem(saleId, {
           productId: Number(it.productId ?? it.id),
           quantity: Number(it.quantity),
-        });
+          price: Number(it.price)
+        }, req.hiboutikAuth);
       }
 
-      // 3. Paiement (PUT sale_attribute=payment)
       stage = 'payment';
-      await hiboutik.recordPayment(saleId, { payment: paymentCode });
+      await hiboutik.recordPayment(saleId, { payment: paymentCode }, req.hiboutikAuth);
 
-      // 4. Clôture
       stage = 'close';
-      await hiboutik.closeSale(saleId);
+      await hiboutik.closeSale(saleId, req.hiboutikAuth);
     } catch (e) {
-      console.error(
-        `[checkout/hiboutik] stage=${stage} saleId=${saleId} :`,
-        e.hiboutik || e.message
-      );
-      // rollback best-effort
-      if (saleId) await hiboutik.cancelSale(saleId);
+      console.error(`[checkout/hiboutik] stage=${stage} saleId=${saleId} :`, e.hiboutik || e.message);
+      if (saleId) await hiboutik.cancelSale(saleId, storeId, req.hiboutikAuth);
 
       if (!config.allowOfflineFallback) {
         return res.status(502).json({
@@ -131,7 +115,7 @@ router.post('/', async (req, res) => {
       warnings.push({ code: 'hiboutik_offline', stage, message: e.message });
       saleId = null;
     }
-  } else if (!hiboutik.isConfigured() && !config.allowOfflineFallback) {
+  } else if (!hiboutik.isConfigured(req.hiboutikAuth) && !config.allowOfflineFallback) {
     return res.status(503).json({
       error: 'hiboutik_not_configured',
       message: 'Hiboutik non configuré et fallback offline désactivé.',
@@ -144,7 +128,7 @@ router.post('/', async (req, res) => {
   const ticketId = `T-${Date.now().toString(36).toUpperCase()}`;
   const taxBreakdown = computeTaxBreakdown(items);
 
-  const printerOnline = await printer.checkOnline();
+  const printerOnline = await printer.checkOnline(req.printerAuth);
   if (!printerOnline) {
     return res.status(207).json({
       success: true,
@@ -168,7 +152,8 @@ router.post('/', async (req, res) => {
       total: totalRounded,
       taxBreakdown,
       payment: paymentLabel,
-    });
+      shop: req.shopOverrides,
+    }, req.printerAuth);
   } catch (e) {
     console.error('[checkout/print]', e.message);
     return res.status(207).json({

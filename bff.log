@@ -1,0 +1,63 @@
+================================================
+ BOUTIDIDACT BFF
+  - port               : 3001
+  - Hiboutik configuré : oui
+  - Hiboutik compte    : microdidact
+  - Store / Vendor     : 1 / 1
+  - Imprimante         : 192.168.1.100:9100 (EPSON)
+  - Fallback offline   : non
+================================================
+[2026-05-07T14:24:35.676Z] POST /api/checkout
+[2026-05-07T14:24:45.272Z] GET /api/health
+[2026-05-07T14:25:34.899Z] POST /api/checkout
+[2026-05-07T14:33:07.866Z] GET /api/health
+[2026-05-07T14:33:09.928Z] GET /api/health
+[2026-05-07T14:33:10.001Z] GET /api/hiboutik/products
+[2026-05-07T14:33:10.091Z] GET /api/hiboutik/categories
+[2026-05-07T14:33:12.012Z] GET /api/hiboutik/products
+[2026-05-07T14:33:12.060Z] GET /api/hiboutik/categories
+[2026-05-07T14:33:31.318Z] GET /api/health
+[2026-05-07T14:33:33.363Z] GET /api/health
+[2026-05-07T14:33:33.406Z] GET /api/hiboutik/products
+[2026-05-07T14:33:33.425Z] GET /api/hiboutik/categories
+[2026-05-07T14:33:35.446Z] GET /api/hiboutik/products
+[2026-05-07T14:33:35.486Z] GET /api/hiboutik/categories
+[2026-05-07T14:33:36.484Z] GET /api/hiboutik/products/30/image
+[2026-05-07T14:33:36.507Z] GET /api/hiboutik/products/29/image
+[2026-05-07T14:33:36.515Z] GET /api/hiboutik/products/28/image
+[2026-05-07T14:33:36.521Z] GET /api/hiboutik/products/27/image
+[2026-05-07T14:33:36.533Z] GET /api/hiboutik/products/26/image
+[2026-05-07T14:33:36.546Z] GET /api/hiboutik/products/25/image
+[2026-05-07T14:33:36.563Z] GET /api/hiboutik/products/24/image
+[2026-05-07T14:33:36.569Z] GET /api/hiboutik/products/23/image
+[2026-05-07T14:33:36.579Z] GET /api/hiboutik/products/22/image
+[2026-05-07T14:33:36.616Z] GET /api/hiboutik/products/21/image
+[2026-05-07T14:33:36.628Z] GET /api/hiboutik/products/20/image
+[2026-05-07T14:33:36.636Z] GET /api/hiboutik/products/19/image
+[2026-05-07T14:33:36.666Z] GET /api/hiboutik/products/18/image
+[2026-05-07T14:33:36.681Z] GET /api/hiboutik/products/17/image
+[2026-05-07T14:33:36.688Z] GET /api/hiboutik/products/16/image
+[2026-05-07T14:33:36.699Z] GET /api/hiboutik/products/15/image
+[2026-05-07T14:33:36.707Z] GET /api/hiboutik/products/14/image
+[2026-05-07T14:33:36.717Z] GET /api/hiboutik/products/13/image
+[2026-05-07T14:33:36.737Z] GET /api/hiboutik/products/12/image
+[2026-05-07T14:33:36.756Z] GET /api/hiboutik/products/11/image
+[2026-05-07T14:33:36.762Z] GET /api/hiboutik/products/10/image
+[2026-05-07T14:33:36.767Z] GET /api/hiboutik/products/9/image
+[2026-05-07T14:33:36.783Z] GET /api/hiboutik/products/8/image
+[2026-05-07T14:33:36.787Z] GET /api/hiboutik/products/7/image
+[2026-05-07T14:33:36.806Z] GET /api/hiboutik/products/6/image
+[2026-05-07T14:33:36.833Z] GET /api/hiboutik/products/5/image
+[2026-05-07T14:33:36.837Z] GET /api/hiboutik/products/4/image
+[2026-05-07T14:33:36.841Z] GET /api/hiboutik/products/3/image
+[2026-05-07T14:33:36.861Z] GET /api/hiboutik/products/2/image
+[2026-05-07T14:33:36.868Z] GET /api/hiboutik/products/1/image
+[2026-05-07T14:33:51.827Z] POST /api/checkout
+[2026-05-07T14:36:01.154Z] POST /api/checkout
+[2026-05-07T14:38:37.447Z] GET /api/hiboutik/products/22/image
+[2026-05-07T14:38:37.460Z] GET /api/hiboutik/products/21/image
+[2026-05-07T14:38:38.826Z] GET /api/hiboutik/products/20/image
+[2026-05-07T14:38:38.831Z] GET /api/hiboutik/products/19/image
+[2026-05-07T14:38:38.838Z] GET /api/hiboutik/products/18/image
+[2026-05-07T14:38:38.845Z] GET /api/hiboutik/products/17/image
+[2026-05-07T14:38:38.855Z] GET /api/hiboutik/products/16/image

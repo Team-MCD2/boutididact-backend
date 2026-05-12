@@ -11,8 +11,8 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   const [hiboutikStatus, printerOnline] = await Promise.all([
-    hiboutik.ping(),
-    printer.checkOnline(),
+    hiboutik.ping(req.hiboutikAuth),
+    printer.checkOnline(req.printerAuth),
   ]);
 
   const ok = hiboutikStatus.ok && printerOnline;
@@ -21,19 +21,19 @@ router.get('/', async (req, res) => {
     ok,
     timestamp: new Date().toISOString(),
     hiboutik: {
-      configured: hiboutik.isConfigured(),
+      configured: hiboutik.isConfigured(req.hiboutikAuth),
       reachable: hiboutikStatus.ok,
       reason: hiboutikStatus.reason ?? null,
-      account: config.hiboutik.account || null,
+      account: req.hiboutikAuth?.account || config.hiboutik.account || null,
     },
     printer: {
-      ip: config.printer.ip,
-      port: config.printer.port,
+      ip: req.printerAuth?.ip || config.printer.ip,
+      port: req.printerAuth?.port || config.printer.port,
       online: printerOnline,
     },
     shop: {
-      name: config.shop.name,
-      siret: config.shop.siret || null,
+      name: req.shopOverrides?.name || config.shop.name,
+      siret: req.shopOverrides?.siret || config.shop.siret || null,
     },
     fallback: { offlineAllowed: config.allowOfflineFallback },
   });

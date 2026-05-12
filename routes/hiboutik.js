@@ -32,14 +32,14 @@ const normalizeCategory = (c) => ({
 });
 
 router.get('/products', async (req, res) => {
-  if (!hiboutik.isConfigured()) {
+  if (!hiboutik.isConfigured(req.hiboutikAuth)) {
     return res.status(503).json({
       error: 'hiboutik_not_configured',
-      message: 'Renseignez HIBOUTIK_ACCOUNT / HIBOUTIK_USER / HIBOUTIK_API_KEY dans le .env',
+      message: 'Renseignez vos accès dans les paramètres de la borne.',
     });
   }
   try {
-    const products = await hiboutik.getProducts();
+    const products = await hiboutik.getProducts(req.hiboutikAuth);
     const list = products.map(normalizeProduct).filter((p) => p.available && p.id);
     res.json({ count: list.length, items: list });
   } catch (e) {
@@ -53,11 +53,11 @@ router.get('/products', async (req, res) => {
 });
 
 router.get('/categories', async (req, res) => {
-  if (!hiboutik.isConfigured()) {
+  if (!hiboutik.isConfigured(req.hiboutikAuth)) {
     return res.status(503).json({ error: 'hiboutik_not_configured' });
   }
   try {
-    const cats = await hiboutik.getCategories();
+    const cats = await hiboutik.getCategories(req.hiboutikAuth);
     res.json({ count: cats.length, items: cats.map(normalizeCategory) });
   } catch (e) {
     console.error('[hiboutik/categories]', e.message);
@@ -66,19 +66,19 @@ router.get('/categories', async (req, res) => {
 });
 
 router.get('/bootstrap', async (req, res) => {
-  if (!hiboutik.isConfigured()) {
+  if (!hiboutik.isConfigured(req.hiboutikAuth)) {
     return res.status(503).json({ error: 'hiboutik_not_configured' });
   }
   try {
     const [stores, users, paymentTypes] = await Promise.all([
-      hiboutik.getStores(),
-      hiboutik.getUsers(),
-      hiboutik.getPaymentTypes(config.hiboutik.storeId).catch(() => []),
+      hiboutik.getStores(req.hiboutikAuth),
+      hiboutik.getUsers(req.hiboutikAuth),
+      hiboutik.getPaymentTypes(config.hiboutik.storeId, req.hiboutikAuth).catch(() => []),
     ]);
     res.json({
       stores,
-      users, // Hiboutik utilise /users (et non /vendors)
-      vendors: users, // alias
+      users,
+      vendors: users,
       paymentTypes,
       defaults: {
         storeId: config.hiboutik.storeId,
@@ -95,26 +95,21 @@ router.get('/bootstrap', async (req, res) => {
 
 /** Codes paiement actifs sur le store : ['CB', 'ESP', 'CHE', 'TR', ...] */
 router.get('/payment_types', async (req, res) => {
-  if (!hiboutik.isConfigured()) return res.status(503).json({ error: 'hiboutik_not_configured' });
+  if (!hiboutik.isConfigured(req.hiboutikAuth)) return res.status(503).json({ error: 'hiboutik_not_configured' });
   try {
-    const list = await hiboutik.getPaymentTypes(config.hiboutik.storeId);
+    const list = await hiboutik.getPaymentTypes(config.hiboutik.storeId, req.hiboutikAuth);
     res.json({ items: list });
   } catch (e) {
     res.status(502).json({ error: 'hiboutik_unreachable', message: e.message });
   }
 });
 
-/**
- * Proxy image produit. Renvoie 204 si Hiboutik n'a aucune image pour ce produit
- * (le frontend affichera alors l'emoji de fallback).
- *  Cache 1h côté navigateur pour éviter de re-frapper Hiboutik à chaque render.
- */
 router.get('/products/:id/image', async (req, res) => {
-  if (!hiboutik.isConfigured()) return res.status(503).end();
+  if (!hiboutik.isConfigured(req.hiboutikAuth)) return res.status(503).end();
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).end();
   try {
-    const img = await hiboutik.getProductImageBinary(id);
+    const img = await hiboutik.getProductImageBinary(id, req.hiboutikAuth);
     if (!img) {
       res.set('Cache-Control', 'public, max-age=300');
       return res.status(204).end();

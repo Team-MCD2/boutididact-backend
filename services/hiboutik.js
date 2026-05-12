@@ -15,14 +15,20 @@
 const axios = require('axios');
 const config = require('../config/env');
 
-const buildClient = () => {
-  if (!config.hiboutik.isConfigured) return null;
+const buildClient = (overrides = null) => {
+  const account = overrides?.account || config.hiboutik.account;
+  const user = overrides?.user || config.hiboutik.user;
+  const apiKey = overrides?.apiKey || config.hiboutik.apiKey;
+  const baseURL = account ? `https://${account}.hiboutik.com/api` : config.hiboutik.baseURL;
+
+  if (!account || !user || !apiKey) return null;
+
   return axios.create({
-    baseURL: config.hiboutik.baseURL,
+    baseURL,
     timeout: 10_000,
     auth: {
-      username: config.hiboutik.user,
-      password: config.hiboutik.apiKey,
+      username: user,
+      password: apiKey,
     },
     headers: {
       Accept: 'application/json',
@@ -32,38 +38,9 @@ const buildClient = () => {
   });
 };
 
-let client = buildClient();
-
-/**
- * Cache productId -> size_id par défaut.
- *  - 0  : produit sans tailles (ou non résolu, on continue avec size_id=0).
- *  - >0 : id de la première taille de ce produit, préalable obligatoire pour
- *         /sales/add_product quand le produit Hiboutik a un size_type non nul.
- *  Alimenté paresseusement par resolveSizeId() lors d'un 422 "size_id required".
- */
-const sizeCache = new Map();
-
-const reload = () => {
-  client = buildClient();
-  sizeCache.clear();
-};
-
-/** Extrait un message d'erreur lisible depuis une exception axios. */
-const formatError = (e) => {
-  const status = e.response?.status;
-  const data = e.response?.data;
-  if (data && typeof data === 'object') {
-    const desc = data.error_description || data.error || 'Erreur Hiboutik';
-    const details = data.details && typeof data.details === 'object'
-      ? Object.entries(data.details).map(([k, v]) => `${k}: ${v}`).join(' | ')
-      : '';
-    return { status, code: data.error || 'hiboutik_error', message: details ? `${desc} (${details})` : desc, details: data.details || null };
-  }
-  return { status, code: e.code || 'network_error', message: e.message, details: null };
-};
-
 /** Vérifie la disponibilité de l'API. */
-const ping = async () => {
+const ping = async (auth = null) => {
+  const client = buildClient(auth);
   if (!client) return { ok: false, reason: 'not_configured' };
   try {
     const { status } = await client.get('/stores', { timeout: 5_000 });
@@ -73,48 +50,45 @@ const ping = async () => {
   }
 };
 
-const getProducts = async () => {
+const getProducts = async (auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const { data } = await client.get('/products');
   return Array.isArray(data) ? data : [];
 };
 
-const getCategories = async () => {
+const getCategories = async (auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const { data } = await client.get('/categories');
   return Array.isArray(data) ? data : [];
 };
 
-const getStores = async () => {
+const getStores = async (auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const { data } = await client.get('/stores');
   return Array.isArray(data) ? data : [];
 };
 
-/** Hiboutik utilise /users (et non /vendors). */
-const getUsers = async () => {
+const getUsers = async (auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const { data } = await client.get('/users');
   return Array.isArray(data) ? data : [];
 };
 
-/** Codes paiement actifs sur le store ('CB', 'ESP', 'CHE', 'TR', ...). */
-const getPaymentTypes = async (storeId = config.hiboutik.storeId) => {
+const getPaymentTypes = async (storeId, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
-  const { data } = await client.get(`/payment_types/${storeId}`);
+  const targetId = storeId || config.hiboutik.storeId;
+  const { data } = await client.get(`/payment_types/${targetId}`);
   return Array.isArray(data) ? data : [];
 };
 
-/**
- * Résout la première size_id valide pour un produit Hiboutik.
- *  Stratégie :
- *    1. GET /products/{id}        -> on lit product_size_type / size_type
- *    2. GET /sizes/{size_type}    -> on prend la première taille
- *  Le résultat est caché en mémoire pour les ventes suivantes.
- *  Renvoie 0 si le produit n'a pas de tailles ou si la résolution échoue.
- */
-const resolveSizeId = async (productId) => {
+const resolveSizeId = async (productId, auth = null) => {
   if (sizeCache.has(productId)) return sizeCache.get(productId);
+  const client = buildClient(auth);
   if (!client) return 0;
 
   try {
@@ -139,58 +113,42 @@ const resolveSizeId = async (productId) => {
     const first = list[0] || {};
     const sizeId = Number(first.size_id ?? first.id ?? 0) || 0;
     sizeCache.set(productId, sizeId);
-    console.log(
-      `[hiboutik] resolveSizeId(product=${productId}) -> size_type=${sizeType}, size_id=${sizeId}`
-    );
     return sizeId;
   } catch (e) {
-    console.warn(
-      `[hiboutik] resolveSizeId(${productId}) impossible :`,
-      e.response?.status || e.code || e.message
-    );
     return 0;
   }
 };
 
-/** Récupère la liste des images d'un produit (peut être vide). */
-const getProductImages = async (productId) => {
+const getProductImages = async (productId, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const { data } = await client.get(`/products_images/${productId}`);
   return Array.isArray(data) ? data : [];
 };
 
-/**
- * Récupère la première image d'un produit en binaire.
- *  @returns {{ contentType, buffer } | null}
- */
-const getProductImageBinary = async (productId) => {
-  const images = await getProductImages(productId);
-  if (!images.length) return null;
-  // Hiboutik renvoie soit un nom de fichier soit une URL. On fabrique l'URL.
+const getProductImageBinary = async (productId, auth = null) => {
+  const client = buildClient(auth);
+  const images = await getProductImages(productId, auth);
+  if (!images.length || !client) return null;
   const first = images[0];
-  const fileName =
-    typeof first === 'string' ? first
-    : first.image_name || first.file_name || first.url || first.image_url || null;
+  const fileName = typeof first === 'string' ? first : first.image_name || first.file_name || first.url || first.image_url || null;
   if (!fileName) return null;
-  // Si le champ est déjà une URL absolue, on l'utilise directement.
-  const url = /^https?:\/\//i.test(fileName)
-    ? fileName
-    : `${config.hiboutik.baseURL.replace(/\/api$/, '')}/products_images/${fileName}`;
+  const url = /^https?:\/\//i.test(fileName) ? fileName : `${client.defaults.baseURL.replace(/\/api$/, '')}/products_images/${fileName}`;
   const r = await axios.get(url, {
     responseType: 'arraybuffer',
     timeout: 8000,
-    auth: { username: config.hiboutik.user, password: config.hiboutik.apiKey },
+    auth: client.defaults.auth,
   });
   return { contentType: r.headers['content-type'] || 'image/jpeg', buffer: Buffer.from(r.data) };
 };
 
-/** Crée une vente. Hiboutik exige currency_code. */
-const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' }) => {
+const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' }, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   const payload = {
-    vendor_id: vendorId ?? config.hiboutik.vendorId,
-    store_id: storeId ?? config.hiboutik.storeId,
-    customer_id: customerId ?? config.hiboutik.defaultCustomerId,
+    vendor_id: vendorId || config.hiboutik.vendorId,
+    store_id: storeId || config.hiboutik.storeId,
+    customer_id: customerId || config.hiboutik.defaultCustomerId,
     currency_code: currencyCode,
   };
   try {
@@ -206,20 +164,8 @@ const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' 
   }
 };
 
-/**
- * Ajoute un produit à une vente : POST /sales/add_product.
- *  stock_withdrawal=1 est OBLIGATOIRE pour pouvoir clôturer la vente
- *  (sinon /sales/close renvoie 422).
- *
- *  Gestion des tailles Hiboutik :
- *    - Si le produit n'a pas de tailles, size_id=0 suffit (cas par défaut).
- *    - Si le produit a un size_type non nul, Hiboutik renvoie 422
- *      ("size_id : please provide a valid size_id for this product_id").
- *      On rattrape ce cas : on résout la première size_id du produit
- *      via resolveSizeId() (avec cache) et on retente l'ajout une fois.
- *    - L'appelant peut préciser sizeId pour court-circuiter la résolution.
- */
-const addItem = async (saleId, { productId, quantity, sizeId, price }) => {
+const addItem = async (saleId, { productId, quantity, sizeId, price }, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
 
   const buildPayload = (sid) => {
@@ -230,20 +176,11 @@ const addItem = async (saleId, { productId, quantity, sizeId, price }) => {
       quantity: Math.max(1, Math.round(quantity)),
       stock_withdrawal: '1',
     };
-    if (typeof price === 'number' && Number.isFinite(price)) {
-      p.product_price = Number(price).toFixed(2);
-    }
+    if (typeof price === 'number' && Number.isFinite(price)) p.product_price = Number(price).toFixed(2);
     return p;
   };
 
-  // Pour la première tentative on utilise (dans l'ordre) :
-  //   - sizeId passé explicitement par l'appelant,
-  //   - sinon la valeur cachée (qui peut être 0 = "sans taille" déjà vérifié),
-  //   - sinon 0.
-  let effectiveSizeId = sizeId;
-  if (effectiveSizeId == null) {
-    effectiveSizeId = sizeCache.has(productId) ? sizeCache.get(productId) : 0;
-  }
+  let effectiveSizeId = sizeId ?? (sizeCache.has(productId) ? sizeCache.get(productId) : 0);
 
   try {
     const { data } = await client.post('/sales/add_product', buildPayload(effectiveSizeId));
@@ -251,24 +188,15 @@ const addItem = async (saleId, { productId, quantity, sizeId, price }) => {
   } catch (e) {
     const status = e.response?.status;
     const details = e.response?.data?.details || {};
-    const sizeError =
-      typeof details.size_id === 'string' && /size.?id/i.test(details.size_id);
+    const sizeError = typeof details.size_id === 'string' && /size.?id/i.test(details.size_id);
 
-    if (status === 422 && sizeError && (effectiveSizeId == null || effectiveSizeId === 0)) {
-      const resolved = await resolveSizeId(productId);
-      if (resolved && resolved !== effectiveSizeId) {
-        try {
-          const { data } = await client.post('/sales/add_product', buildPayload(resolved));
-          return data;
-        } catch (e2) {
-          const f = formatError(e2);
-          const err = new Error(`Ajout produit ${productId} (size ${resolved}) : ${f.message}`);
-          err.hiboutik = f;
-          throw err;
-        }
+    if (status === 422 && sizeError && effectiveSizeId === 0) {
+      const resolved = await resolveSizeId(productId, auth);
+      if (resolved) {
+        const { data } = await client.post('/sales/add_product', buildPayload(resolved));
+        return data;
       }
     }
-
     const f = formatError(e);
     const err = new Error(`Ajout produit ${productId} : ${f.message}`);
     err.hiboutik = f;
@@ -276,13 +204,8 @@ const addItem = async (saleId, { productId, quantity, sizeId, price }) => {
   }
 };
 
-/**
- * Définit le moyen de paiement de la vente via PUT /sale/{id}
- *  (équivalent : sale_attribute=payment, new_value=<code>).
- *  Pour une borne : un seul paiement par vente -> on utilise cet endpoint
- *  plutôt que /sales_payment_div (qui exige sale_attribute=DIV).
- */
-const recordPayment = async (saleId, { payment }) => {
+const recordPayment = async (saleId, { payment }, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   try {
     const { data } = await client.put(`/sale/${saleId}`, {
@@ -298,8 +221,8 @@ const recordPayment = async (saleId, { payment }) => {
   }
 };
 
-/** Clôture la vente : POST /sales/close. */
-const closeSale = async (saleId) => {
+const closeSale = async (saleId, auth = null) => {
+  const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
   try {
     const { data } = await client.post('/sales/close', { sale_id: saleId });
@@ -312,27 +235,26 @@ const closeSale = async (saleId) => {
   }
 };
 
-/** Annule la vente : POST /sales/void. */
-const cancelSale = async (saleId, storeId = config.hiboutik.storeId) => {
+const cancelSale = async (saleId, storeId, auth = null) => {
+  const client = buildClient(auth);
   if (!client) return null;
   try {
-    const { data } = await client.post('/sales/void', { sale_id: saleId, store_id: storeId });
+    const { data } = await client.post('/sales/void', { sale_id: saleId, store_id: storeId || config.hiboutik.storeId });
     return data;
   } catch (e) {
-    console.warn(`[hiboutik] cancelSale(${saleId}) impossible :`, e.response?.status, e.response?.data?.error_description || e.message);
     return null;
   }
 };
 
 module.exports = {
-  isConfigured: () => config.hiboutik.isConfigured,
-  reload,
+  isConfigured: (auth = null) => !!(auth?.account || config.hiboutik.isConfigured),
+  reload: () => sizeCache.clear(),
   ping,
   getProducts,
   getCategories,
   getStores,
   getUsers,
-  getVendors: getUsers, // alias rétro-compatible
+  getVendors: getUsers,
   getPaymentTypes,
   getProductImages,
   getProductImageBinary,
@@ -342,5 +264,4 @@ module.exports = {
   closeSale,
   cancelSale,
   resolveSizeId,
-  _sizeCache: sizeCache, // exposition pour tests / debug
 };

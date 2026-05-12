@@ -10,8 +10,10 @@ const ThermalPrinter = require('node-thermal-printer').printer;
 const PrinterTypes = require('node-thermal-printer').types;
 const config = require('../config/env');
 
-const checkOnline = (ip = config.printer.ip, port = config.printer.port, timeout = 2000) =>
-  new Promise((resolve) => {
+const checkOnline = (auth = null, timeout = 2000) => {
+  const ip = auth?.ip || config.printer.ip;
+  const port = auth?.port || config.printer.port;
+  return new Promise((resolve) => {
     const socket = new net.Socket();
     socket.setTimeout(timeout);
     socket.once('connect', () => {
@@ -28,13 +30,15 @@ const checkOnline = (ip = config.printer.ip, port = config.printer.port, timeout
     });
     socket.connect(port, ip);
   });
+};
 
 const buildPrinter = (overrides = {}) => {
-  const ip = overrides.printerIp || config.printer.ip;
+  const ip = overrides.ip || config.printer.ip;
+  const port = overrides.port || config.printer.port;
   const type = (overrides.type || config.printer.type) === 'STAR' ? PrinterTypes.STAR : PrinterTypes.EPSON;
   return new ThermalPrinter({
     type,
-    interface: `tcp://${ip}`,
+    interface: `tcp://${ip}:${port}`,
     characterSet: 'PC858_EURO',
     removeSpecialCharacters: false,
     width: overrides.width || config.printer.width,
@@ -48,20 +52,8 @@ const padCenter = (txt, w) => {
   return ' '.repeat(left) + txt + ' '.repeat(w - txt.length - left);
 };
 
-/**
- * @param {object} ticket
- *   - ticketId      : string (N° séquentiel)
- *   - saleId        : string|number (ID Hiboutik si dispo)
- *   - items         : [{ name, quantity, price (TTC unitaire) }]
- *   - total         : nombre TTC
- *   - taxBreakdown  : [{ rate: 20, base: 12.50, tax: 2.50 }] (optionnel)
- *   - payment       : libellé paiement (CB / Espèces / ...)
- *   - shop          : { name, address, siret, tva, footer }
- *   - printerIp     : override
- *   - openDrawer    : bool
- */
-const printTicket = async (ticket = {}) => {
-  const printer = buildPrinter({ printerIp: ticket.printerIp });
+const printTicket = async (ticket = {}, printerAuth = null) => {
+  const printer = buildPrinter(printerAuth);
   const w = config.printer.width;
   const shop = { ...config.shop, ...(ticket.shop || {}) };
 
