@@ -166,17 +166,46 @@ const getProductImageBinary = async (productId, auth = null) => {
   return { contentType: r.headers['content-type'] || 'image/jpeg', buffer: Buffer.from(r.data) };
 };
 
-// Crée un produit Hiboutik (utilisé pour matérialiser les produits locaux IA/CRUD au moment du checkout).
-const createProduct = async ({ name, price, categoryId, vatRate = 20 }, auth = null) => {
+// Cache du tax_id par défaut Hiboutik (reset via reload())
+let defaultTaxIdCache = null;
+
+const getTaxes = async (auth = null) => {
   const client = buildClient(auth);
   if (!client) throw new Error('Hiboutik non configuré');
+  const { data } = await client.get('/taxes');
+  return Array.isArray(data) ? data : [];
+};
+
+// Résout le tax_id par défaut du compte Hiboutik (product_vat attend un ID, pas un %).
+const getDefaultTaxId = async (auth = null) => {
+  if (defaultTaxIdCache !== null) return defaultTaxIdCache;
+  try {
+    const taxes = await getTaxes(auth);
+    // Cherche la taxe par défaut, sinon la première taxe activée, sinon 0
+    const defaultTax = taxes.find(t => Number(t.tax_default) === 1)
+      || taxes.find(t => Number(t.tax_enabled) === 1)
+      || taxes[0];
+    defaultTaxIdCache = defaultTax ? Number(defaultTax.tax_id) : 0;
+  } catch (e) {
+    console.warn('[hiboutik] Impossible de récupérer les taxes, utilisation de tax_id=0 :', e.message);
+    defaultTaxIdCache = 0;
+  }
+  return defaultTaxIdCache;
+};
+
+// Crée un produit Hiboutik (utilisé pour matérialiser les produits locaux IA/CRUD au moment du checkout).
+const createProduct = async ({ name, price, categoryId }, auth = null) => {
+  const client = buildClient(auth);
+  if (!client) throw new Error('Hiboutik non configuré');
+  const taxId = await getDefaultTaxId(auth);
   const payload = {
     product_model: String(name || 'Produit').slice(0, 90),
     product_price: Number(price).toFixed(2),
     product_category: Number(categoryId),
-    product_vat: Number(vatRate),
+    product_vat: taxId,
     product_stock_management: 0,
   };
+  console.log('[hiboutik/createProduct] payload:', JSON.stringify(payload));
   try {
     const { data } = await client.post('/products', payload);
     const productId = data?.product_id ?? data?.id ?? data?.[0]?.product_id;
@@ -184,6 +213,7 @@ const createProduct = async ({ name, price, categoryId, vatRate = 20 }, auth = n
     return Number(productId);
   } catch (e) {
     const f = formatError(e);
+    console.error('[hiboutik/createProduct] Hiboutik 422 details:', JSON.stringify(f));
     const err = new Error(`Création produit "${name}" : ${f.message}`);
     err.hiboutik = f;
     throw err;
@@ -305,10 +335,11 @@ const cancelSale = async (saleId, storeId, auth = null) => {
 
 module.exports = {
   isConfigured: (auth = null) => !!(auth?.account || config.hiboutik.isConfigured),
-  reload: () => sizeCache.clear(),
+  reload: () => { sizeCache.clear(); defaultTaxIdCache = null; },
   ping,
   getProducts,
   getCategories,
+  getTaxes,
   getStores,
   getUsers,
   getVendors: getUsers,
