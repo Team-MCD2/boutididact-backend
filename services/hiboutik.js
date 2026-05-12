@@ -18,6 +18,27 @@ const config = require('../config/env');
 // Cache mémoire des size_id par product_id (reset via reload())
 const sizeCache = new Map();
 
+// Normalise une erreur Axios -> { status, message, data } pour propagation côté frontend.
+const formatError = (e) => {
+  const status = e?.response?.status || e?.code || 'network_error';
+  const data = e?.response?.data;
+  let message = e?.message || 'Erreur inconnue';
+  if (data) {
+    if (typeof data === 'string') {
+      message = data;
+    } else if (data.error_description) {
+      message = data.error_description;
+    } else if (data.message) {
+      message = data.message;
+    } else if (data.error) {
+      message = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+    } else {
+      try { message = JSON.stringify(data); } catch { /* ignore */ }
+    }
+  }
+  return { status, message, data };
+};
+
 const buildClient = (overrides = null) => {
   const account = overrides?.account || config.hiboutik.account;
   const user = overrides?.user || config.hiboutik.user;
