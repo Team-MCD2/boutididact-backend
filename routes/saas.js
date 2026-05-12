@@ -258,15 +258,16 @@ router.post('/delete-account', async (req, res) => {
     return res.status(501).json({ error: 'stripe_not_configured', message: 'Service indisponible.' });
   }
 
-  const { shopName, password } = req.body || {};
-  if (!shopName || !password) {
-    return res.status(400).json({ error: 'missing_credentials', message: 'Nom de boutique et mot de passe requis.' });
+  const { shopName, email } = req.body || {};
+  if (!shopName || !email) {
+    return res.status(400).json({ error: 'missing_fields', message: 'Nom de boutique et email associés requis.' });
   }
 
   try {
     const customer = await findShopByName(stripe, shopName);
-    if (!customer || !customer.metadata || customer.metadata.boutiquePassword !== password) {
-      return res.status(401).json({ error: 'invalid_credentials', message: 'Nom de boutique ou mot de passe invalide.' });
+    const linkedEmail = (customer?.metadata?.boutiqueEmail || customer?.email || '').toLowerCase();
+    if (!customer || linkedEmail !== email.trim().toLowerCase()) {
+      return res.status(404).json({ error: 'not_found', message: 'Aucune boutique ne correspond à ce nom et cet email.' });
     }
 
     // 1) Annuler toutes les souscriptions actives du customer
