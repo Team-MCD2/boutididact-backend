@@ -171,9 +171,10 @@ router.get('/verify-subscription', async (req, res) => {
     }
 
     if (!alreadyHandled && transporter) {
+      const mails = [];
       // 1) Mail admin (avec mot de passe choisi)
       if (process.env.ADMIN_EMAIL_RECEIVER) {
-        transporter.sendMail({
+        mails.push(transporter.sendMail({
           from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
           to: process.env.ADMIN_EMAIL_RECEIVER,
           subject: '🔔 NOUVEAU CLIENT BOUTIDIDACT',
@@ -182,11 +183,11 @@ router.get('/verify-subscription', async (req, res) => {
                 `Email Boutique : ${meta.boutiqueEmail}\n` +
                 `Mot de passe choisi : ${meta.boutiquePassword}\n\n` +
                 `→ Créez son compte Hiboutik et envoyez-lui ses identifiants par e-mail.`,
-        }).catch(e => console.error('[saas] mail admin:', e.message));
+        }).then(() => console.log('[saas] mail admin envoyé')).catch(e => console.error('[saas] mail admin:', e.message)));
       }
 
       // 2) Mail client
-      transporter.sendMail({
+      mails.push(transporter.sendMail({
         from: `"BOUTIDIDACT Team" <${process.env.SMTP_USER}>`,
         to: meta.boutiqueEmail,
         subject: '🚀 Bienvenue chez BOUTIDIDACT !',
@@ -197,7 +198,11 @@ router.get('/verify-subscription', async (req, res) => {
             <p>Pour vous connecter à votre borne, utilisez le <strong>nom de boutique</strong> et le <strong>mot de passe</strong> choisis lors de l'inscription.</p>
             <p>L'équipe BOUTIDIDACT</p>
           </div>`,
-      }).catch(e => console.error('[saas] mail client:', e.message));
+      }).then(() => console.log('[saas] mail client envoyé')).catch(e => console.error('[saas] mail client:', e.message)));
+
+      // IMPORTANT : on attend la fin des envois avant de répondre,
+      // sinon la lambda Vercel gèle et coupe la connexion SMTP.
+      await Promise.allSettled(mails);
     }
 
     res.json({
@@ -289,7 +294,7 @@ router.post('/delete-account', async (req, res) => {
 
     // 3) Notifier admin
     if (transporter && process.env.ADMIN_EMAIL_RECEIVER) {
-      transporter.sendMail({
+      await transporter.sendMail({
         from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
         to: process.env.ADMIN_EMAIL_RECEIVER,
         subject: '🗑️ SUPPRESSION COMPTE BOUTIDIDACT',
