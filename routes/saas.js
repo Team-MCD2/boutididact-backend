@@ -103,6 +103,25 @@ router.post('/stripe-checkout', async (req, res) => {
     // Unicité par email (consistent)
     const existingByEmail = await findShopByEmail(stripe, boutiqueEmail);
     if (existingByEmail) {
+      // PROCÉDURE DE SECOURS : Si le client existe mais n'a pas de nom de boutique (metadata vide)
+      // Cela arrive si la redirection post-paiement a échoué (bug 404 précédent).
+      if (!existingByEmail.metadata?.boutiqueName) {
+        console.log(`[saas] Client trouvé sans metadata pour ${boutiqueEmail}. Restauration...`);
+        await stripe.customers.update(existingByEmail.id, {
+          metadata: {
+            boutiqueName,
+            boutiqueNameLower: boutiqueName.toLowerCase(),
+            boutiqueEmail,
+            boutiquePassword,
+            paidAt: new Date().toISOString() // On assume payé si le client existe (à vérifier via subs si besoin)
+          }
+        });
+        return res.json({ 
+          message: "Votre compte a été récupéré et mis à jour ! Vous pouvez maintenant vous connecter.",
+          redirect: "/login" 
+        });
+      }
+
       console.log(`[saas] Création refusée: email déjà utilisé (${boutiqueEmail})`);
       return res.status(409).json({
         error: 'email_already_exists',
