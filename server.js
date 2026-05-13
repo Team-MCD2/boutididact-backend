@@ -44,6 +44,32 @@ app.use((req, res, next) => {
   next();
 });
 
+// ---- Middleware Multi-tenant (Boutique & Imprimante) ----
+app.use((req, res, next) => {
+  // Identification boutique
+  const shopName = req.headers['x-shop-name'];
+  if (shopName) {
+    req.shopOverrides = {
+      name: shopName,
+      address: req.headers['x-shop-address'],
+      siret: req.headers['x-shop-siret'],
+      tva: req.headers['x-shop-tva']
+    };
+  }
+
+  // Configuration imprimante
+  const printerIp = req.headers['x-printer-ip'];
+  if (printerIp) {
+    req.printerAuth = {
+      ip: printerIp,
+      port: req.headers['x-printer-port'] || '9100',
+      type: req.headers['x-printer-type'] || 'EPSON',
+      width: req.headers['x-printer-width'] || 42
+    };
+  }
+  next();
+});
+
 // ---- Routes API ----
 app.use('/api/health', healthRouter);
 app.use('/api/hiboutik', hiboutikRouter);
