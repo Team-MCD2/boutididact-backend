@@ -21,8 +21,22 @@ const config = require('./config/env');
 const { getLocalIp } = require('./services/printer');
 
 const app = express();
+
+const healthRouter = require('./routes/health');
+const hiboutikRouter = require('./routes/hiboutik');
+const checkoutRouter = require('./routes/checkout');
+const printRouter = require('./routes/print');
+const saasRouter = require('./routes/saas');
+
 app.use(cors());
 app.use(express.json());
+
+// ---- Routes API ----
+app.use('/api/health', healthRouter);
+app.use('/api/hiboutik', hiboutikRouter);
+app.use('/api/checkout', checkoutRouter);
+app.use('/api/print', printRouter);
+app.use('/api/saas', saasRouter);
 
 // ---- Gestion des paramètres locaux ----
 const SETTINGS_PATH = path.join(process.cwd(), 'local-settings.json');
