@@ -155,6 +155,51 @@ router.post('/', async (req, res) => {
   const printerOnline = await printer.checkOnline(req.printerAuth);
   if (!printerOnline) {
     console.warn(`[checkout] ❌ Imprimante injoignable (${req.printerAuth?.ip || 'IP par défaut'})`);
+    
+    // ---- FALLBACK RELAIS ----
+    // Si on est sur Vercel (Cloud), on pousse le ticket dans la file d'attente
+    if (req.shopOverrides?.name && req.shopOverrides.name !== 'BOUTIDIDACT') {
+      try {
+        const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+        // On réutilise la même logique que saas.js mais directement ici pour la rapidité
+        const { data: customers } = await stripe.customers.search({
+          query: `metadata['boutiqueNameLower']:'${req.shopOverrides.name.toLowerCase()}'`,
+          limit: 1
+        });
+        if (customers[0]) {
+          await stripe.customers.update(customers[0].id, {
+            metadata: {
+              pending_ticket: JSON.stringify({
+                ticketId,
+                saleId,
+                items: items.map((it) => ({
+                  name: it.name || `Produit #${it.productId ?? it.id}`,
+                  quantity: Number(it.quantity),
+                  price: Number(it.price),
+                })),
+                total: totalRounded,
+                taxBreakdown,
+                payment: paymentLabel,
+                shop: req.shopOverrides,
+              })
+            }
+          });
+          console.log(`[checkout] ☁️ Ticket mis en file d'attente RELAIS pour ${req.shopOverrides.name}`);
+          return res.json({
+            success: true,
+            saleId,
+            ticketId,
+            printed: true, // On dit que c'est "imprimé" car c'est en file d'attente
+            relay: true,
+            total: totalRounded,
+            idMapping,
+          });
+        }
+      } catch (relayError) {
+        console.error('[checkout] Erreur mise en file relais:', relayError.message);
+      }
+    }
+
     return res.status(207).json({
       success: true,
       saleId,

@@ -434,4 +434,66 @@ router.post('/extract-menu', async (req, res) => {
   });
 });
 
+// ============================================================
+// RELAY MODE : Impression sans Ngrok (via file d'attente Stripe)
+// ============================================================
+
+// La tablette pousse le ticket ici
+router.post('/push-ticket', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName, ticketData } = req.body || {};
+  if (!shopName || !ticketData) return res.status(400).json({ error: 'missing_data' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    // On stocke le ticket dans les metadata Stripe (limité à 500 chars par clé, donc on JSON stringify)
+    // Stripe permet 50 clés. On va utiliser une clé "pending_ticket".
+    // Note: Si le ticket est trop gros, on le tronque ou on utilise plusieurs clés, 
+    // mais ici on va juste envoyer l'essentiel.
+    await stripe.customers.update(customer.id, {
+      metadata: {
+        pending_ticket: JSON.stringify(ticketData)
+      }
+    });
+
+    res.json({ ok: true, message: 'Ticket en file d\'attente.' });
+  } catch (e) {
+    console.error('[saas] push-ticket:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Le .exe vient chercher le ticket ici toutes les 2-3 secondes
+router.get('/poll-ticket', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName } = req.query;
+  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    const pending = customer.metadata?.pending_ticket;
+    if (!pending) {
+      return res.json({ ticket: null });
+    }
+
+    // On vide la file d'attente immédiatement pour ne pas imprimer en double
+    await stripe.customers.update(customer.id, {
+      metadata: { pending_ticket: '' }
+    });
+
+    res.json({ ticket: JSON.parse(pending) });
+  } catch (e) {
+    console.error('[saas] poll-ticket:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;

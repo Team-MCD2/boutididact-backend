@@ -295,9 +295,43 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
         exec('start http://localhost:3001');
         
         if (rl) rl.close();
+        // Empêche le processus de se fermer
         setInterval(() => {}, 1000 * 60 * 60);
       }
+    } else {
+      finish();
     }
+
+    // ---- MODE RELAIS (SaaS) ----
+    const POLL_INTERVAL = 3000;
+    setInterval(async () => {
+      const shopName = config.shop.name;
+      if (!shopName || shopName === 'placeholder' || shopName === 'BOUTIDIDACT') return;
+
+      try {
+        const axios = require('axios');
+        const vercelUrl = 'https://boutididact.vercel.app';
+        const { data } = await axios.get(`${vercelUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, {
+          timeout: 5000
+        });
+
+        if (data.ticket) {
+          console.log(`[relay] 📥 Ticket reçu du Cloud : ${data.ticket.ticketId}`);
+          const printer = require('./services/printer');
+          await printer.printTicket(data.ticket, {
+            ip: config.printer.ip,
+            port: config.printer.port,
+            type: config.printer.type,
+            width: config.printer.width
+          });
+          console.log(`[relay] ✅ Ticket imprimé avec succès.`);
+        }
+      } catch (e) {
+        if (e.response?.status !== 404 && e.code !== 'ECONNREFUSED') {
+          // Erreur silencieuse
+        }
+      }
+    }, POLL_INTERVAL);
   });
 }
 
