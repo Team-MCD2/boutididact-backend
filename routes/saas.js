@@ -35,15 +35,22 @@ const transporter = buildTransporter();
 // Stripe Search est éventuellement consistant : on retry une fois si vide.
 async function findShopByName(stripe, boutiqueName) {
   if (!boutiqueName) return null;
-  const lower = boutiqueName.toLowerCase().replace(/'/g, "\\'");
-  const query = `metadata['boutiqueNameLower']:'${lower}'`;
+  const lower = boutiqueName.toLowerCase().trim();
+  const query = `metadata['boutiqueNameLower']:'${lower.replace(/'/g, "\\'")}'`;
+
+  console.log(`[saas] Recherche boutique: "${boutiqueName}" (query: ${query})`);
 
   const trySearch = async () => {
     try {
       const res = await stripe.customers.search({ query, limit: 1 });
-      return res.data[0] || null;
+      if (res.data && res.data.length > 0) {
+        console.log(`[saas] Boutique trouvée: ${res.data[0].id}`);
+        return res.data[0];
+      }
+      return null;
     } catch (e) {
       console.error('[saas] findShopByName error:', e.message);
+      // Si l'erreur est liée à l'indexation, on peut tenter une recherche manuelle lente
       return null;
     }
   };
@@ -51,12 +58,17 @@ async function findShopByName(stripe, boutiqueName) {
   let found = await trySearch();
   if (found) return found;
 
-  // Retry rapide (consistance éventuelle de l'index Stripe Search)
-  await new Promise(r => setTimeout(r, 600));
+  // Si non trouvé, on tente une recherche par email si l'utilisateur est en train de se connecter
+  // mais ici on fait un petit retry car Stripe Search est "eventually consistent"
+  console.log(`[saas] Non trouvé, retry dans 1s...`);
+  await new Promise(r => setTimeout(r, 1000));
   found = await trySearch();
-  if (found) return found;
+  
+  if (!found) {
+    console.warn(`[saas] Boutique "${boutiqueName}" introuvable après retry.`);
+  }
 
-  return null;
+  return found;
 }
 
 async function findShopByEmail(stripe, email) {
@@ -88,6 +100,7 @@ router.post('/stripe-checkout', async (req, res) => {
     // Unicité par email (consistent)
     const existingByEmail = await findShopByEmail(stripe, boutiqueEmail);
     if (existingByEmail) {
+      console.log(`[saas] Création refusée: email déjà utilisé (${boutiqueEmail})`);
       return res.status(409).json({
         error: 'email_already_exists',
         message: 'Cet email est déjà associé à une boutique. Veuillez vous connecter.',
@@ -97,6 +110,7 @@ router.post('/stripe-checkout', async (req, res) => {
     // Unicité par nom (eventually consistent ~ 1 min)
     const existingByName = await findShopByName(stripe, boutiqueName);
     if (existingByName) {
+      console.log(`[saas] Création refusée: nom déjà utilisé (${boutiqueName})`);
       return res.status(409).json({
         error: 'shop_already_exists',
         message: `Le nom de boutique "${boutiqueName}" est déjà utilisé. Choisissez-en un autre ou connectez-vous.`,
@@ -104,6 +118,8 @@ router.post('/stripe-checkout', async (req, res) => {
     }
 
     const origin = req.headers.origin || `http://localhost:${config.port}`;
+    console.log(`[saas] Création session Stripe pour ${boutiqueName} (Origin: ${origin})...`);
+    
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       customer_email: boutiqueEmail,
@@ -119,8 +135,6 @@ router.post('/stripe-checkout', async (req, res) => {
         },
         quantity: 1,
       }],
-      // Le checkout crée automatiquement un Customer en mode subscription.
-      // On propage les métadonnées vers la session ET la subscription.
       metadata: {
         boutiqueName,
         boutiqueNameLower: boutiqueName.toLowerCase(),
@@ -141,8 +155,11 @@ router.post('/stripe-checkout', async (req, res) => {
     });
     res.json({ url: session.url });
   } catch (error) {
-    console.error('[saas] stripe-checkout:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('[saas] ERREUR STRIPE CHECKOUT:', error.message);
+    res.status(500).json({ 
+      error: 'stripe_error', 
+      message: `Erreur Stripe : ${error.message}` 
+    });
   }
 });
 
@@ -246,14 +263,19 @@ router.post('/login', async (req, res) => {
 
   try {
     const customer = await findShopByName(stripe, shopName);
-    if (!customer || !customer.metadata) {
+    if (!customer) {
+      console.log(`[saas] Login échoué: Boutique "${shopName}" introuvable dans Stripe.`);
+      return res.status(401).json({ error: 'invalid_credentials', message: 'Nom de boutique inconnu ou abonnement non finalisé.' });
+    }
+    
+    if (!customer.metadata || customer.metadata.boutiquePassword !== password) {
+      console.log(`[saas] Login échoué: Mot de passe incorrect pour "${shopName}".`);
       return res.status(401).json({ error: 'invalid_credentials', message: 'Nom de boutique ou mot de passe invalide.' });
     }
-    if (customer.metadata.boutiquePassword !== password) {
-      return res.status(401).json({ error: 'invalid_credentials', message: 'Nom de boutique ou mot de passe invalide.' });
-    }
+    
     if (!customer.metadata.paidAt) {
-      return res.status(403).json({ error: 'unpaid', message: 'Abonnement non activé.' });
+      console.log(`[saas] Login échoué: Boutique "${shopName}" trouvée mais non payée.`);
+      return res.status(403).json({ error: 'unpaid', message: 'Votre abonnement n\'est pas encore actif. Veuillez finaliser le paiement.' });
     }
 
     res.json({
@@ -265,8 +287,8 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('[saas] login:', error.message);
-    res.status(500).json({ error: 'internal_error', message: error.message });
+    console.error('[saas] login error:', error.message);
+    res.status(500).json({ error: 'internal_error', message: `Erreur serveur : ${error.message}` });
   }
 });
 
@@ -325,8 +347,11 @@ router.post('/delete-account', async (req, res) => {
 
     res.json({ ok: true, message: 'Boutique supprimée.' });
   } catch (error) {
-    console.error('[saas] delete-account:', error.message);
-    res.status(500).json({ error: 'internal_error', message: error.message });
+    console.error('[saas] delete-account error:', error.message);
+    res.status(500).json({ 
+      error: 'internal_error', 
+      message: `Erreur lors de la suppression : ${error.message}` 
+    });
   }
 });
 
