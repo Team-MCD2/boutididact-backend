@@ -160,37 +160,54 @@ router.post('/', async (req, res) => {
     // Si on est sur Vercel (Cloud), on pousse le ticket dans la file d'attente
     if (req.shopOverrides?.name && req.shopOverrides.name !== 'BOUTIDIDACT') {
       try {
-        const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-        // On réutilise la même logique que saas.js mais directement ici pour la rapidité
+        const Stripe = require('stripe');
+        const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+        
+        // On cherche le client
+        const lower = req.shopOverrides.name.toLowerCase().trim();
         const { data: customers } = await stripe.customers.search({
-          query: `metadata['boutiqueNameLower']:'${req.shopOverrides.name.toLowerCase()}'`,
+          query: `metadata['boutiqueNameLower']:'${lower.replace(/'/g, "\\'")}'`,
           limit: 1
         });
+        
         if (customers[0]) {
-          await stripe.customers.update(customers[0].id, {
-            metadata: {
-              pending_ticket: JSON.stringify({
-                ticketId,
-                saleId,
-                items: items.map((it) => ({
-                  name: it.name || `Produit #${it.productId ?? it.id}`,
-                  quantity: Number(it.quantity),
-                  price: Number(it.price),
-                })),
-                total: totalRounded,
-                taxBreakdown,
-                payment: paymentLabel,
-                shop: req.shopOverrides,
-                printer: {
-                  ip: req.printerAuth?.ip,
-                  port: req.printerAuth?.port,
-                  type: req.printerAuth?.type,
-                  width: req.printerAuth?.width
-                }
-              })
+          const ticketObj = {
+            ticketId,
+            saleId,
+            items: items.map((it) => ({
+              name: it.name || `Produit #${it.productId ?? it.id}`,
+              quantity: Number(it.quantity),
+              price: Number(it.price),
+            })),
+            total: totalRounded,
+            taxBreakdown,
+            payment: paymentLabel,
+            shop: req.shopOverrides,
+            printer: {
+              ip: req.printerAuth?.ip,
+              port: req.printerAuth?.port,
+              type: req.printerAuth?.type,
+              width: req.printerAuth?.width
             }
+          };
+
+          const fullJson = JSON.stringify(ticketObj);
+          const CHUNK_SIZE = 450;
+          const chunks = {};
+          const cleanMetadata = {};
+          for(let i=1; i<=10; i++) cleanMetadata[`tk_${i}`] = '';
+
+          for (let i = 0; i < fullJson.length; i += CHUNK_SIZE) {
+            const part = Math.floor(i / CHUNK_SIZE) + 1;
+            if (part > 10) break;
+            chunks[`tk_${part}`] = fullJson.substring(i, i + CHUNK_SIZE);
+          }
+
+          await stripe.customers.update(customers[0].id, {
+            metadata: { ...cleanMetadata, ...chunks, tk_count: Object.keys(chunks).length }
           });
-          console.log(`[checkout] ☁️ Ticket mis en file d'attente RELAIS pour ${req.shopOverrides.name}`);
+
+          console.log(`[checkout] ☁️ Ticket RELAIS mis en file (${fullJson.length} chars) pour ${req.shopOverrides.name}`);
           return res.json({
             success: true,
             saleId,
