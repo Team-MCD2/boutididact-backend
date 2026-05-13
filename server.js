@@ -208,13 +208,17 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
         output: process.stdout
       });
 
-      // Vérification si les raccourcis existent déjà
+      // Vérification si les raccourcis existent déjà (Démarrage ou Bureau)
       const checkScript = `
         $s = [Environment]::GetFolderPath('Startup');
         $d = [Environment]::GetFolderPath('Desktop');
-        $hasS = Test-Path (Join-Path $s 'Boutididact-Print.lnk');
-        $hasD = Test-Path (Join-Path $d 'Boutididact-Print.lnk');
-        if ($hasS -or $hasD) { "exists" } else { "none" }
+        $names = @('Boutididact-Print.lnk', 'Boutididact.lnk', 'Boutididact-Print-Server.lnk');
+        $found = $false;
+        foreach ($n in $names) {
+          if (Test-Path (Join-Path $s $n)) { $found = $true; break }
+          if (Test-Path (Join-Path $d $n)) { $found = $true; break }
+        }
+        if ($found) { "exists" } else { "none" }
       `.replace(/\n/g, ' ');
 
       exec(`powershell -Command "${checkScript}"`, (err, stdout) => {
@@ -291,8 +295,8 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
         console.log('👉 Dashboard de configuration : http://localhost:3001');
         console.log('================================================\n');
         
-        // Ouverture automatique du navigateur
-        exec('start http://localhost:3001');
+        // Le serveur tourne en arrière-plan, plus besoin d'ouvrir le navigateur local
+        // exec('start http://localhost:3001');
         
         if (rl) rl.close();
         // Empêche le processus de se fermer
@@ -318,13 +322,16 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
         if (data.ticket) {
           console.log(`[relay] 📥 Ticket reçu du Cloud : ${data.ticket.ticketId}`);
           const printer = require('./services/printer');
-          await printer.printTicket(data.ticket, {
-            ip: config.printer.ip,
-            port: config.printer.port,
-            type: config.printer.type,
-            width: config.printer.width
-          });
-          console.log(`[relay] ✅ Ticket imprimé avec succès.`);
+          // On utilise la config envoyée par la tablette en priorité
+          const printerConfig = {
+            ip: data.ticket.printer?.ip || config.printer.ip,
+            port: data.ticket.printer?.port || config.printer.port,
+            type: data.ticket.printer?.type || config.printer.type,
+            width: data.ticket.printer?.width || config.printer.width
+          };
+          
+          await printer.printTicket(data.ticket, printerConfig);
+          console.log(`[relay] ✅ Ticket imprimé avec succès sur ${printerConfig.ip}`);
         }
       } catch (e) {
         if (e.response?.status !== 404 && e.code !== 'ECONNREFUSED') {

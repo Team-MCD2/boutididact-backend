@@ -181,6 +181,12 @@ router.post('/', async (req, res) => {
                 taxBreakdown,
                 payment: paymentLabel,
                 shop: req.shopOverrides,
+                printer: {
+                  ip: req.printerAuth?.ip,
+                  port: req.printerAuth?.port,
+                  type: req.printerAuth?.type,
+                  width: req.printerAuth?.width
+                }
               })
             }
           });
