@@ -35,17 +35,11 @@ app.use(express.json());
 app.use((req, res, next) => {
   const account = req.headers['x-hiboutik-account'];
   if (account) {
-    console.log(`[hiboutik] Auth reçue pour le compte : ${account}`);
     req.hiboutikAuth = {
       account,
       user: req.headers['x-hiboutik-user'],
       apiKey: req.headers['x-hiboutik-api-key']
     };
-  } else {
-    // Si pas de headers, on logue pour debug
-    if (req.url.startsWith('/api/hiboutik')) {
-      console.warn(`[hiboutik] Tentative d'accès sans headers Auth sur ${req.url}`);
-    }
   }
   next();
 });

@@ -545,24 +545,34 @@ router.post('/push-ticket', async (req, res) => {
     const customer = await findShopByName(stripe, shopName);
     if (!customer) return res.status(404).json({ error: 'shop_not_found' });
 
-    // On stocke le ticket dans les metadata Stripe (limité à 500 chars par clé, donc on JSON stringify)
-    // Stripe permet 50 clés. On va utiliser une clé "pending_ticket".
-    // Note: Si le ticket est trop gros, on le tronque ou on utilise plusieurs clés, 
-    // mais ici on va juste envoyer l'essentiel.
+    const fullJson = JSON.stringify(ticketData);
+    const CHUNK_SIZE = 450; // On garde une marge sous les 500
+    const chunks = {};
+    
+    // On nettoie les anciens morceaux d'abord
+    const cleanMetadata = {};
+    for(let i=1; i<=10; i++) cleanMetadata[`tk_${i}`] = '';
+    
+    // On découpe le nouveau ticket
+    for (let i = 0; i < fullJson.length; i += CHUNK_SIZE) {
+      const part = Math.floor(i / CHUNK_SIZE) + 1;
+      if (part > 10) break; // Sécurité : max 10 morceaux (~4.5KB)
+      chunks[`tk_${part}`] = fullJson.substring(i, i + CHUNK_SIZE);
+    }
+
     await stripe.customers.update(customer.id, {
-      metadata: {
-        pending_ticket: JSON.stringify(ticketData)
-      }
+      metadata: { ...cleanMetadata, ...chunks, tk_count: Object.keys(chunks).length }
     });
 
-    res.json({ ok: true, message: 'Ticket en file d\'attente.' });
+    console.log(`[saas] Ticket mis en file d'attente pour ${shopName} (${fullJson.length} chars)`);
+    res.json({ ok: true });
   } catch (e) {
-    console.error('[saas] push-ticket:', e.message);
+    console.error('[saas] push-ticket error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// Le .exe vient chercher le ticket ici toutes les 2-3 secondes
+// Le .exe vient chercher le ticket ici
 router.get('/poll-ticket', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
@@ -574,19 +584,23 @@ router.get('/poll-ticket', async (req, res) => {
     const customer = await findShopByName(stripe, shopName);
     if (!customer) return res.status(404).json({ error: 'shop_not_found' });
 
-    const pending = customer.metadata?.pending_ticket;
-    if (!pending) {
-      return res.json({ ticket: null });
+    const count = parseInt(customer.metadata?.tk_count || '0');
+    if (count === 0) return res.json({ ticket: null });
+
+    // Reconstitution du JSON
+    let fullJson = '';
+    for (let i = 1; i <= count; i++) {
+      fullJson += (customer.metadata[`tk_${i}`] || '');
     }
 
-    // On vide la file d'attente immédiatement pour ne pas imprimer en double
-    await stripe.customers.update(customer.id, {
-      metadata: { pending_ticket: '' }
-    });
+    // On vide la file d'attente immédiatement
+    const cleanMetadata = { tk_count: '0' };
+    for(let i=1; i<=10; i++) cleanMetadata[`tk_${i}`] = '';
+    await stripe.customers.update(customer.id, { metadata: cleanMetadata });
 
-    res.json({ ticket: JSON.parse(pending) });
+    res.json({ ticket: JSON.parse(fullJson) });
   } catch (e) {
-    console.error('[saas] poll-ticket:', e.message);
+    console.error('[saas] poll-ticket error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
