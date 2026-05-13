@@ -11,7 +11,8 @@ const PrinterTypes = require('node-thermal-printer').types;
 const config = require('../config/env');
 
 const checkOnline = (auth = null, timeout = 5000) => {
-  const ip = auth?.ip || config.printer.ip;
+  let ip = auth?.ip || config.printer.ip;
+  if (ip) ip = ip.trim();
   const port = parseInt(auth?.port || config.printer.port, 10) || 9100;
   if (!ip || ip === '0.0.0.0' || ip === '') {
     console.warn('[printer] Aucune adresse IP configurée pour l\'imprimante.');
@@ -41,7 +42,8 @@ const checkOnline = (auth = null, timeout = 5000) => {
 };
 
 const buildPrinter = (overrides = {}) => {
-  const ip = overrides.ip || config.printer.ip;
+  let ip = overrides.ip || config.printer.ip;
+  if (ip) ip = ip.trim();
   const port = parseInt(overrides.port || config.printer.port, 10) || 9100;
   const type = (overrides.type || config.printer.type) === 'STAR' ? PrinterTypes.STAR : PrinterTypes.EPSON;
   console.log(`[printer] Construction interface TCP: tcp://${ip}:${port} (type: ${type === PrinterTypes.STAR ? 'STAR' : 'EPSON'})`);
