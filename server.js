@@ -114,6 +114,45 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
     console.log(`  - Imprimante         : ${config.printer.ip}:${config.printer.port} (${config.printer.type})`);
     console.log(`  - Fallback offline   : ${config.allowOfflineFallback ? 'oui' : 'non'}`);
     console.log('================================================');
+    
+    // Si exécuté via le .exe généré par pkg, on propose l'ajout au démarrage
+    if (process.pkg && process.stdout.isTTY) {
+      const fs = require('fs');
+      const path = require('path');
+      const { exec } = require('child_process');
+      const readline = require('readline');
+      
+      const startupPath = path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'Boutididact-Print.lnk');
+      
+      if (!fs.existsSync(startupPath)) {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        
+        rl.question('\n👉 Voulez-vous configurer ce programme pour qu\'il se lance automatiquement au démarrage de Windows ? (o/N) : ', (answer) => {
+          if (answer.toLowerCase() === 'o') {
+            const exePath = process.execPath;
+            const psScript = `
+              $WshShell = New-Object -comObject WScript.Shell
+              $Shortcut = $WshShell.CreateShortcut('${startupPath}')
+              $Shortcut.TargetPath = '${exePath}'
+              $Shortcut.WindowStyle = 7
+              $Shortcut.Save()
+            `.replace(/\n/g, ';');
+            
+            exec(`powershell -Command "${psScript}"`, (err) => {
+              if (err) console.error('❌ Erreur lors de la création du raccourci:', err.message);
+              else console.log('✅ Configuré avec succès ! Le serveur démarrera avec Windows.');
+              rl.close();
+            });
+          } else {
+            console.log('Ignoré.');
+            rl.close();
+          }
+        });
+      }
+    }
   });
 }
 
