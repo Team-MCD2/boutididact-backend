@@ -25,8 +25,20 @@
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "jimp": "^1.6.1",
     "node-thermal-printer": "^4.6.0",
     "nodemailer": "^8.0.7",
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^5.0.2",
     "stripe": "^22.1.1"
+  },
+  "bin": "server.js",
+  "pkg": {
+    "assets": [
+      "logo.ico"
+    ],
+    "targets": [
+      "node18-win-x64"
+    ]
   }
 }
