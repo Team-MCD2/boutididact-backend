@@ -96,8 +96,15 @@ const os = require('os');
 function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
+    // Ignorer VirtualBox et autres interfaces virtuelles communes
+    if (name.toLowerCase().includes('virtualbox') || name.toLowerCase().includes('vbox') || name.toLowerCase().includes('vmware')) continue;
+    
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+      if (iface.family === 'IPv4' && !iface.internal) {
+        // Ignorer les IPs typiques de VirtualBox si le nom n'était pas explicite
+        if (iface.address.startsWith('192.168.56.')) continue;
+        return iface.address;
+      }
     }
   }
   return 'localhost';
@@ -140,7 +147,8 @@ app.get('/', (req, res) => {
             
             <div class="code-block">
               <small style="color: #64748b; display:block; margin-bottom: 5px;">URL Serveur Local :</small>
-              <span class="code-val">http://${localIp}:3001</span>
+              <span class="code-val">http://localhost:3001</span>
+              <small style="color: #475569; font-size: 0.7rem;">(ou http://${localIp}:3001 si vous utilisez une tablette)</small>
             </div>
 
             <div class="code-block" id="printerBox">
@@ -185,7 +193,8 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
     }
     console.log(`  - Imprimante         : ${config.printer.ip}:${config.printer.port} (${config.printer.type})`);
     console.log(`  - Fallback offline   : ${config.allowOfflineFallback ? 'oui' : 'non'}`);
-    console.log('================================================');    // Si exécuté via le .exe généré par pkg, on propose l'ajout au démarrage
+    console.log('================================================');
+    // Si exécuté via le .exe généré par pkg, on propose l'ajout au démarrage
     if (process.pkg && process.stdout.isTTY) {
       const fs = require('fs');
       const path = require('path');

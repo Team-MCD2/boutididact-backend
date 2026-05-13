@@ -149,10 +149,12 @@ router.post('/', async (req, res) => {
 
   // ---- 5 : Impression ----
   const ticketId = `T-${Date.now().toString(36).toUpperCase()}`;
+  console.log(`[checkout] 🖨️  Démarrage phase impression pour ticket ${ticketId}`);
   const taxBreakdown = computeTaxBreakdown(items);
 
   const printerOnline = await printer.checkOnline(req.printerAuth);
   if (!printerOnline) {
+    console.warn(`[checkout] ❌ Imprimante injoignable (${req.printerAuth?.ip || 'IP par défaut'})`);
     return res.status(207).json({
       success: true,
       saleId,
@@ -165,6 +167,7 @@ router.post('/', async (req, res) => {
   }
 
   try {
+    console.log(`[checkout] 📤 Envoi des données à l'imprimante...`);
     await printer.printTicket({
       ticketId,
       saleId,
@@ -178,8 +181,9 @@ router.post('/', async (req, res) => {
       payment: paymentLabel,
       shop: req.shopOverrides,
     }, req.printerAuth);
+    console.log(`[checkout] ✅ Impression réussie pour ticket ${ticketId}`);
   } catch (e) {
-    console.error('[checkout/print]', e.message);
+    console.error(`[checkout] ❌ Échec impression ticket ${ticketId} :`, e.message);
     return res.status(207).json({
       success: true,
       saleId,
