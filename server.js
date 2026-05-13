@@ -94,6 +94,13 @@ app.post('/api/local-config', async (req, res) => {
 
 app.get('/', (req, res) => {
   const localIp = getLocalIp();
+  // Injection sécurisée pour éviter les erreurs de syntaxe JS
+  const initialConfig = JSON.stringify({
+    shopName: localSettings.shopName || '',
+    cloudUrl: localSettings.cloudUrl || '',
+    printerIp: localSettings.printerIp || ''
+  });
+
   res.send(`
     <html>
       <head>
@@ -114,9 +121,9 @@ app.get('/', (req, res) => {
           .status-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; margin-bottom: 2rem; }
           .status-online { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.2); }
           .status-offline { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
-          #message { margin-top: 1.5rem; font-size: 0.875rem; border-radius: 0.75rem; padding: 1rem; display: none; }
-          .msg-success { background: rgba(16, 185, 129, 0.1); color: #10b981; display: block !important; }
-          .msg-error { background: rgba(239, 68, 68, 0.1); color: #ef4444; display: block !important; }
+          #message { margin-top: 1.5rem; font-size: 0.875rem; border-radius: 0.75rem; padding: 1rem; display: none; min-height: 1.25rem; }
+          .msg-success { background: rgba(16, 185, 129, 0.1) !important; color: #10b981 !important; display: block !important; }
+          .msg-error { background: rgba(239, 68, 68, 0.1) !important; color: #ef4444 !important; display: block !important; }
         </style>
       </head>
       <body>
@@ -130,17 +137,17 @@ app.get('/', (req, res) => {
 
           <div class="form-group">
             <label>Nom de la boutique (identique à l'inscription)</label>
-            <input type="text" id="shopName" placeholder="ex: MaBoutique" value="${localSettings.shopName}">
+            <input type="text" id="shopName" placeholder="ex: MaBoutique" value="${localSettings.shopName || ''}">
           </div>
 
           <div class="form-group">
             <label>URL de votre API Cloud (Vercel)</label>
-            <input type="text" id="cloudUrl" placeholder="https://votre-projet.vercel.app" value="${localSettings.cloudUrl}">
+            <input type="text" id="cloudUrl" placeholder="https://votre-projet.vercel.app" value="${localSettings.cloudUrl || ''}">
           </div>
 
           <div class="form-group">
             <label>IP de l'imprimante thermique locale</label>
-            <input type="text" id="printerIp" placeholder="ex: 192.168.1.100" value="${localSettings.printerIp}">
+            <input type="text" id="printerIp" placeholder="ex: 192.168.1.100" value="${localSettings.printerIp || ''}">
           </div>
 
           <button id="saveBtn" onclick="saveConfig()">Enregistrer & Lancer le Relais</button>
@@ -154,12 +161,28 @@ app.get('/', (req, res) => {
         </div>
 
         <script>
+          // On récupère la config injectée proprement
+          var config = ${initialConfig};
+
+          function setStatus(online) {
+            var el = document.getElementById('connectionStatus');
+            if (online) {
+              el.className = 'status-badge status-online';
+              el.innerHTML = '<span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span> RELAY ACTIF';
+            } else {
+              el.className = 'status-badge status-offline';
+              el.innerHTML = '<span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span> RELAY INACTIF';
+            }
+          }
+
+          if (config.shopName) setStatus(true);
+
           async function saveConfig() {
-            const btn = document.getElementById('saveBtn');
-            const msg = document.getElementById('message');
-            const shopName = document.getElementById('shopName').value.trim();
-            const cloudUrl = document.getElementById('cloudUrl').value.trim().replace(/\/$/, '');
-            const printerIp = document.getElementById('printerIp').value.trim();
+            var btn = document.getElementById('saveBtn');
+            var msg = document.getElementById('message');
+            var shopName = document.getElementById('shopName').value.trim();
+            var cloudUrl = document.getElementById('cloudUrl').value.trim().replace(/\\/$/, '');
+            var printerIp = document.getElementById('printerIp').value.trim();
 
             if(!shopName || !printerIp || !cloudUrl) return alert('Veuillez remplir tous les champs.');
 
@@ -169,40 +192,35 @@ app.get('/', (req, res) => {
             msg.style.display = 'none';
 
             try {
-              const res = await fetch('/api/local-config', {
+              var res = await fetch('/api/local-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ shopName, printerIp, printerPort: '9100', cloudUrl })
+                body: JSON.stringify({ shopName: shopName, printerIp: printerIp, printerPort: '9100', cloudUrl: cloudUrl })
               });
-              const data = await res.json();
+              var data = await res.json();
 
               if(data.success) {
                 msg.innerText = data.message;
                 msg.className = 'msg-success';
-                document.getElementById('connectionStatus').className = 'status-badge status-online';
-                document.getElementById('connectionStatus').innerText = '● RELAY ACTIF';
+                setStatus(true);
               } else {
                 throw new Error(data.error || 'Erreur inconnue');
               }
             } catch (e) {
               msg.innerText = e.message;
               msg.className = 'msg-error';
+              setStatus(false);
             } finally {
               btn.disabled = false;
-              btn.innerText = 'Enregistrer & Lancer';
+              btn.innerText = 'Enregistrer & Lancer le Relais';
             }
-          }
-
-          // Check initial status
-          if("${localSettings.shopName}") {
-             document.getElementById('connectionStatus').className = 'status-badge status-online';
-             document.getElementById('connectionStatus').innerText = '● RELAY ACTIF';
           }
         </script>
       </body>
     </html>
   `);
 });
+
 
 // 404
 app.use((req, res) => res.status(404).json({ error: 'not_found', path: req.url }));
