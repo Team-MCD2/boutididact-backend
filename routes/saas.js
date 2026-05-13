@@ -338,7 +338,7 @@ const EXTRACT_PROMPT = `Voici une photo d'un menu de restaurant.
 Extrais tous les plats, boissons, et menus avec leurs prix.
 Renvoie UNIQUEMENT le résultat STRICTEMENT au format JSON. Ne mets aucun texte avant ou après.
 Le format attendu est un tableau d'objets avec ces clés exactes :
-"name" (nom du produit), "price" (prix en nombre, ex: 12.5), "category" (catégorie du produit), "desc" (description).`;
+"name" (nom du produit), "price" (prix en nombre, ex: 12.5), "category" (catégorie du produit), "desc" (description courte), "composition" (liste des ingrédients/composants séparés par des virgules, ex: "Salade, Tomate, Oignon, Steak, Fromage"). Si la composition n'est pas visible, mets une chaîne vide.`;
 
 const parseProductsJson = (text) => {
   const cleaned = String(text || '')

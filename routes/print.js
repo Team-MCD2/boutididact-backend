@@ -9,12 +9,17 @@ const router = express.Router();
 
 router.post('/', async (req, res) => {
   try {
-    const { items = [], total, paiement, ticketId, printerIp } = req.body || {};
+    const { items = [], total, paiement, ticketId, printerIp, printerPort } = req.body || {};
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'empty_items' });
     }
 
-    const online = await printer.checkOnline(printerIp);
+    // Build printer auth from body or fallback to header overrides
+    const printerAuth = printerIp
+      ? { ip: printerIp, port: printerPort || '9100' }
+      : req.printerAuth;
+
+    const online = await printer.checkOnline(printerAuth);
     if (!online) {
       return res.status(503).json({ error: "L'imprimante est hors ligne ou injoignable." });
     }
@@ -24,8 +29,7 @@ router.post('/', async (req, res) => {
       items,
       total,
       payment: paiement || 'Espèces',
-      printerIp,
-    });
+    }, printerAuth);
 
     res.json({ success: true });
   } catch (e) {

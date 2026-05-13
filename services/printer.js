@@ -10,21 +10,29 @@ const ThermalPrinter = require('node-thermal-printer').printer;
 const PrinterTypes = require('node-thermal-printer').types;
 const config = require('../config/env');
 
-const checkOnline = (auth = null, timeout = 2000) => {
+const checkOnline = (auth = null, timeout = 5000) => {
   const ip = auth?.ip || config.printer.ip;
-  const port = auth?.port || config.printer.port;
+  const port = parseInt(auth?.port || config.printer.port, 10) || 9100;
+  if (!ip || ip === '0.0.0.0' || ip === '') {
+    console.warn('[printer] Aucune adresse IP configurée pour l\'imprimante.');
+    return Promise.resolve(false);
+  }
+  console.log(`[printer] Vérification : ${ip}:${port} (timeout ${timeout}ms)`);
   return new Promise((resolve) => {
     const socket = new net.Socket();
     socket.setTimeout(timeout);
     socket.once('connect', () => {
+      console.log(`[printer] ✅ Imprimante joignable sur ${ip}:${port}`);
       socket.destroy();
       resolve(true);
     });
     socket.once('timeout', () => {
+      console.warn(`[printer] ⏱️ Timeout sur ${ip}:${port}`);
       socket.destroy();
       resolve(false);
     });
-    socket.once('error', () => {
+    socket.once('error', (err) => {
+      console.warn(`[printer] ❌ Erreur connexion ${ip}:${port} :`, err.message);
       socket.destroy();
       resolve(false);
     });
@@ -34,15 +42,16 @@ const checkOnline = (auth = null, timeout = 2000) => {
 
 const buildPrinter = (overrides = {}) => {
   const ip = overrides.ip || config.printer.ip;
-  const port = overrides.port || config.printer.port;
+  const port = parseInt(overrides.port || config.printer.port, 10) || 9100;
   const type = (overrides.type || config.printer.type) === 'STAR' ? PrinterTypes.STAR : PrinterTypes.EPSON;
+  console.log(`[printer] Construction interface TCP: tcp://${ip}:${port} (type: ${type === PrinterTypes.STAR ? 'STAR' : 'EPSON'})`);
   return new ThermalPrinter({
     type,
     interface: `tcp://${ip}:${port}`,
     characterSet: 'PC858_EURO',
     removeSpecialCharacters: false,
     width: overrides.width || config.printer.width,
-    options: { timeout: 5000 },
+    options: { timeout: 8000 },
   });
 };
 
