@@ -31,6 +31,19 @@ const saasRouter = require('./routes/saas');
 app.use(cors());
 app.use(express.json());
 
+// ---- Middleware Auth Hiboutik Multi-tenant ----
+app.use((req, res, next) => {
+  const account = req.headers['x-hiboutik-account'];
+  if (account) {
+    req.hiboutikAuth = {
+      account,
+      user: req.headers['x-hiboutik-user'],
+      apiKey: req.headers['x-hiboutik-api-key']
+    };
+  }
+  next();
+});
+
 // ---- Routes API ----
 app.use('/api/health', healthRouter);
 app.use('/api/hiboutik', hiboutikRouter);
