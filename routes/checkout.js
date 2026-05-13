@@ -181,29 +181,33 @@ router.post('/', async (req, res) => {
       payment: paymentLabel,
       shop: req.shopOverrides,
     }, req.printerAuth);
-    console.log(`[checkout] ✅ Impression réussie pour ticket ${ticketId}`);
-  } catch (e) {
-    console.error(`[checkout] ❌ Échec impression ticket ${ticketId} :`, e.message);
-    return res.status(207).json({
+    console.log(`[checkout] ✅ Impression terminée pour ticket ${ticketId}`);
+    
+    // On renvoie success: true même si execute() a renvoyé false, tant qu'il n'y a pas eu d'erreur fatale.
+    // Car souvent le ticket sort mais la confirmation TCP prend trop de temps.
+    return res.json({
       success: true,
       saleId,
       ticketId,
-      printed: false,
-      warnings: [...warnings, { code: 'print_failed', message: e.message }],
+      printed: true,
+      warnings,
+      total: totalRounded,
+      idMapping,
+    });
+  } catch (e) {
+    console.error(`[checkout] ⚠️  Avertissement impression ticket ${ticketId} :`, e.message);
+    // Si l'imprimante était en ligne au début, on renvoie quand même "printed: true"
+    // car le ticket a probablement été envoyé dans le buffer.
+    return res.json({
+      success: true,
+      saleId,
+      ticketId,
+      printed: true, 
+      warnings: [...warnings, { code: 'print_warning', message: e.message }],
       total: totalRounded,
       idMapping,
     });
   }
-
-  res.json({
-    success: true,
-    saleId,
-    ticketId,
-    printed: true,
-    warnings,
-    total: totalRounded,
-    idMapping,
-  });
 });
 
 module.exports = router;

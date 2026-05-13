@@ -146,9 +146,11 @@ app.get('/', (req, res) => {
             <p style="font-size: 0.9rem; color: #94a3b8;">Copiez ces 2 informations dans votre interface d'administration Boutididact :</p>
             
             <div class="code-block">
-              <small style="color: #64748b; display:block; margin-bottom: 5px;">URL Serveur Local :</small>
+              <span class="config-title" style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">📱 POUR CET ORDINATEUR :</span>
               <span class="code-val">http://localhost:3001</span>
-              <small style="color: #475569; font-size: 0.7rem;">(ou http://${localIp}:3001 si vous utilisez une tablette)</small>
+              
+              <span class="config-title" style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">🌐 POUR TABLETTES / RÉSEAU :</span>
+              <span class="code-val">http://${localIp}:3001</span>
             </div>
 
             <div class="code-block" id="printerBox">
