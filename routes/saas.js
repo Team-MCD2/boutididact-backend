@@ -185,17 +185,20 @@ router.get('/verify-subscription', async (req, res) => {
     if (!alreadyHandled && transporter) {
       const mails = [];
       // 1) Mail admin (avec mot de passe choisi)
+      // ADMIN_EMAIL_RECEIVER supporte plusieurs adresses séparées par des virgules
+      // ex: admin1@mail.com,admin2@mail.com
       if (process.env.ADMIN_EMAIL_RECEIVER) {
+        const adminRecipients = process.env.ADMIN_EMAIL_RECEIVER;
         mails.push(transporter.sendMail({
           from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
-          to: process.env.ADMIN_EMAIL_RECEIVER,
+          to: adminRecipients,
           subject: '🔔 NOUVEAU CLIENT BOUTIDIDACT',
           text: `Un nouveau client vient de payer son abonnement.\n\n` +
                 `Nom Boutique : ${meta.boutiqueName}\n` +
                 `Email Boutique : ${meta.boutiqueEmail}\n` +
                 `Mot de passe choisi : ${meta.boutiquePassword}\n\n` +
                 `→ Créez son compte Hiboutik et envoyez-lui ses identifiants par e-mail.`,
-        }).then(() => console.log('[saas] mail admin envoyé')).catch(e => console.error('[saas] mail admin:', e.message)));
+        }).then(() => console.log('[saas] mail admin envoyé à:', adminRecipients)).catch(e => console.error('[saas] mail admin:', e.message)));
       }
 
       // 2) Mail client
@@ -305,10 +308,12 @@ router.post('/delete-account', async (req, res) => {
     await stripe.customers.del(customer.id);
 
     // 3) Notifier admin
+    // ADMIN_EMAIL_RECEIVER supporte plusieurs adresses séparées par des virgules
     if (transporter && process.env.ADMIN_EMAIL_RECEIVER) {
+      const adminRecipients = process.env.ADMIN_EMAIL_RECEIVER;
       await transporter.sendMail({
         from: `"BOUTIDIDACT System" <${process.env.SMTP_USER}>`,
-        to: process.env.ADMIN_EMAIL_RECEIVER,
+        to: adminRecipients,
         subject: '🗑️ SUPPRESSION COMPTE BOUTIDIDACT',
         text: `Une boutique vient d'être supprimée.\n\n` +
               `Nom Boutique : ${boutiqueName}\n` +
