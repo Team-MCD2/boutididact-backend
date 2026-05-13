@@ -10,35 +10,31 @@ const ThermalPrinter = require('node-thermal-printer').printer;
 const PrinterTypes = require('node-thermal-printer').types;
 const config = require('../config/env');
 
-const checkOnline = (auth = null, timeout = 5000) => {
-  let ip = auth?.ip || config.printer.ip;
-  if (ip) ip = ip.trim();
-  const port = parseInt(auth?.port || config.printer.port, 10) || 9100;
-  if (!ip || ip === '0.0.0.0' || ip === '') {
-    console.warn('[printer] Aucune adresse IP configurée pour l\'imprimante.');
-    return Promise.resolve(false);
-  }
-  console.log(`[printer] Vérification : ${ip}:${port} (timeout ${timeout}ms)`);
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(timeout);
-    socket.once('connect', () => {
+const checkOnline = async (auth = null, timeout = 5000) => {
+  try {
+    const printerInstance = buildPrinter(auth);
+    let ip = auth?.ip || config.printer.ip;
+    if (ip) ip = ip.trim();
+    const port = parseInt(auth?.port || config.printer.port, 10) || 9100;
+    
+    if (!ip || ip === '0.0.0.0' || ip === '') {
+      console.warn('[printer] Aucune adresse IP configurée pour l\'imprimante.');
+      return false;
+    }
+    
+    console.log(`[printer] Vérification via node-thermal-printer : ${ip}:${port} (timeout ${timeout}ms)`);
+    const isConnected = await printerInstance.isPrinterConnected();
+    if (isConnected) {
       console.log(`[printer] ✅ Imprimante joignable sur ${ip}:${port}`);
-      socket.destroy();
-      resolve(true);
-    });
-    socket.once('timeout', () => {
-      console.warn(`[printer] ⏱️ Timeout sur ${ip}:${port}`);
-      socket.destroy();
-      resolve(false);
-    });
-    socket.once('error', (err) => {
-      console.warn(`[printer] ❌ Erreur connexion ${ip}:${port} :`, err.message);
-      socket.destroy();
-      resolve(false);
-    });
-    socket.connect(port, ip);
-  });
+      return true;
+    } else {
+      console.warn(`[printer] ❌ Imprimante injoignable sur ${ip}:${port} (isPrinterConnected = false)`);
+      return false;
+    }
+  } catch (error) {
+    console.warn(`[printer] ❌ Erreur lors du checkOnline : ${error.message}`);
+    return false;
+  }
 };
 
 const buildPrinter = (overrides = {}) => {
