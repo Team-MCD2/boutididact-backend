@@ -38,19 +38,28 @@ async function findShopByName(stripe, boutiqueName) {
   const lower = boutiqueName.toLowerCase().trim();
   const query = `metadata['boutiqueNameLower']:'${lower.replace(/'/g, "\\'")}'`;
 
-  console.log(`[saas] Recherche boutique: "${boutiqueName}" (query: ${query})`);
+  console.log(`[saas] Recherche boutique: "${boutiqueName}"`);
 
   const trySearch = async () => {
     try {
       const res = await stripe.customers.search({ query, limit: 1 });
       if (res.data && res.data.length > 0) {
-        console.log(`[saas] Boutique trouvée: ${res.data[0].id}`);
-        return res.data[0];
+        const potentialCustomer = res.data[0];
+        // VÉRIFICATION CRUCIALE : L'index search de Stripe peut être obsolète.
+        // On vérifie si le client existe vraiment et n'est pas supprimé.
+        try {
+          const realCustomer = await stripe.customers.retrieve(potentialCustomer.id);
+          if (realCustomer && !realCustomer.deleted) {
+            console.log(`[saas] Boutique validée: ${realCustomer.id}`);
+            return realCustomer;
+          }
+        } catch (e) {
+          console.warn(`[saas] Client fantôme détecté (${potentialCustomer.id}), on ignore.`);
+        }
       }
       return null;
     } catch (e) {
       console.error('[saas] findShopByName error:', e.message);
-      // Si l'erreur est liée à l'indexation, on peut tenter une recherche manuelle lente
       return null;
     }
   };
@@ -58,16 +67,10 @@ async function findShopByName(stripe, boutiqueName) {
   let found = await trySearch();
   if (found) return found;
 
-  // Si non trouvé, on tente une recherche par email si l'utilisateur est en train de se connecter
-  // mais ici on fait un petit retry car Stripe Search est "eventually consistent"
   console.log(`[saas] Non trouvé, retry dans 1s...`);
   await new Promise(r => setTimeout(r, 1000));
   found = await trySearch();
   
-  if (!found) {
-    console.warn(`[saas] Boutique "${boutiqueName}" introuvable après retry.`);
-  }
-
   return found;
 }
 
