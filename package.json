@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test:health": "node -e \"require('http').get('http://localhost:3001/api/health', r => r.on('data', d => process.stdout.write(d)))\""
+    "test:health": "node -e \"require('http').get('http://localhost:3001/api/health', r => r.on('data', d => process.stdout.write(d)))\"",
+    "build": "npx pkg . --output Boutididact-Print-Server.exe"
   },
   "keywords": [
     "hiboutik",

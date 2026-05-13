@@ -261,6 +261,7 @@ router.post('/login', async (req, res) => {
       shop: {
         name: customer.metadata.boutiqueName,
         email: customer.metadata.boutiqueEmail || customer.email || '',
+        settings: customer.metadata.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null
       },
     });
   } catch (error) {
@@ -432,6 +433,53 @@ router.post('/extract-menu', async (req, res) => {
     error: 'all_providers_failed',
     message: `Aucun fournisseur IA n'a répondu. (${errors.join(' | ')})`,
   });
+});
+
+// ============================================================
+// SETTINGS PERSISTENCE
+// ============================================================
+
+router.post('/save-settings', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName, settings } = req.body || {};
+  if (!shopName || !settings) return res.status(400).json({ error: 'missing_data' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    await stripe.customers.update(customer.id, {
+      metadata: {
+        shopSettings: JSON.stringify(settings)
+      }
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[saas] save-settings:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/get-settings', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName } = req.query;
+  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    const settings = customer.metadata?.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null;
+    res.json({ ok: true, settings });
+  } catch (e) {
+    console.error('[saas] get-settings:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ============================================================

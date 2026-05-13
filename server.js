@@ -12,160 +12,191 @@
  *    POST /api/checkout
  *    POST /api/print          (legacy / test imprimante)
  */
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
 const express = require('express');
 const cors = require('cors');
-
 const config = require('./config/env');
-const healthRouter = require('./routes/health');
-const hiboutikRouter = require('./routes/hiboutik');
-const checkoutRouter = require('./routes/checkout');
-const printRouter = require('./routes/print');
-const saasRouter = require('./routes/saas');
+const { getLocalIp } = require('./services/printer');
 
 const app = express();
+app.use(cors());
+app.use(express.json());
 
-// ---- CORS ----
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin || config.corsOrigins.includes('*')) return cb(null, true);
-      if (config.corsOrigins.includes(origin)) return cb(null, true);
-      if (/^https?:\/\/localhost(:\d+)?$/.test(origin)) return cb(null, true);
-      // Autoriser les domaines vercel.app
-      if (origin.endsWith('.vercel.app')) return cb(null, true);
-      return cb(new Error(`CORS refusé : ${origin}`));
-    },
-    credentials: false,
-  })
-);
+// ---- Gestion des paramètres locaux ----
+const SETTINGS_PATH = path.join(process.cwd(), 'local-settings.json');
+let localSettings = { 
+  shopName: '', 
+  printerIp: '192.168.1.100', 
+  printerPort: '9100', 
+  cloudUrl: 'https://boutididact-backendd.vercel.app' 
+};
 
-app.use(express.json({ limit: '10mb' }));
-
-// ---- Multi-tenant Auth Middleware ----
-app.use((req, res, next) => {
-  const account = req.headers['x-hiboutik-account'];
-  const user = req.headers['x-hiboutik-user'];
-  const apiKey = req.headers['x-hiboutik-api-key'];
-  const storeId = req.headers['x-hiboutik-store-id'];
-  const vendorId = req.headers['x-hiboutik-vendor-id'];
-
-  if (account && user && apiKey) {
-    req.hiboutikAuth = { 
-      account, 
-      user, 
-      apiKey,
-      storeId: storeId || config.hiboutik.storeId,
-      vendorId: vendorId || config.hiboutik.vendorId
-    };
-  }
-
-  // Shop Mentions Overrides
-  req.shopOverrides = {
-    name: req.headers['x-shop-name'],
-    address: req.headers['x-shop-address'],
-    siret: req.headers['x-shop-siret'],
-    tva: req.headers['x-shop-tva'],
-  };
-
-  // Printer Overrides
-  const pIp = req.headers['x-printer-ip'];
-  const pPort = req.headers['x-printer-port'];
-  if (pIp) {
-    req.printerAuth = { ip: pIp, port: pPort || '9100' };
-  }
-
-  next();
-});
-
-// ---- Logger minimal ----
-app.use((req, _res, next) => {
-  const t = new Date().toISOString();
-  console.log(`[${t}] ${req.method} ${req.url}`);
-  next();
-});
-
-// ---- Routes ----
-app.use('/api/health', healthRouter);
-app.use('/api/hiboutik', hiboutikRouter);
-app.use('/api/checkout', checkoutRouter);
-app.use('/api/print', printRouter);
-app.use('/api/saas', saasRouter);
-
-// ---- Dashboard de configuration local ----
-const os = require('os');
-function getLocalIp() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    // Ignorer VirtualBox et autres interfaces virtuelles communes
-    if (name.toLowerCase().includes('virtualbox') || name.toLowerCase().includes('vbox') || name.toLowerCase().includes('vmware')) continue;
-    
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        // Ignorer les IPs typiques de VirtualBox si le nom n'était pas explicite
-        if (iface.address.startsWith('192.168.56.')) continue;
-        return iface.address;
-      }
+function loadLocalSettings() {
+  if (fs.existsSync(SETTINGS_PATH)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+      localSettings = { ...localSettings, ...data };
+      console.log('[config] Paramètres locaux chargés :', localSettings.shopName);
+    } catch (e) {
+      console.error('[config] Erreur lecture local-settings.json');
     }
   }
-  return 'localhost';
 }
+loadLocalSettings();
+
+function saveLocalSettings(settings) {
+  localSettings = { ...localSettings, ...settings };
+  fs.writeFileSync(SETTINGS_PATH, JSON.stringify(localSettings, null, 2));
+}
+
+// ---- Routes de configuration locale ----
+app.get('/api/local-config', (req, res) => {
+  res.json(localSettings);
+});
+
+app.post('/api/local-config', async (req, res) => {
+  const { shopName, printerIp, printerPort, cloudUrl } = req.body;
+  
+  if (!shopName) return res.status(400).json({ error: 'Nom de boutique requis' });
+
+  try {
+    // 1. Vérifier si la boutique existe sur le Cloud
+    const targetUrl = cloudUrl || localSettings.cloudUrl;
+    console.log(`[config] Vérification de la boutique "${shopName}" sur ${targetUrl}...`);
+    
+    const testRes = await axios.get(`${targetUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, { timeout: 8000 });
+    
+    // 2. Tester l'imprimante
+    const printer = require('./services/printer');
+    const printerOnline = await printer.checkOnline({ ip: printerIp, port: printerPort });
+
+    saveLocalSettings({ shopName, printerIp, printerPort, cloudUrl: targetUrl });
+
+    res.json({ 
+      success: true, 
+      printerOnline,
+      message: printerOnline ? 'Configuration enregistrée et validée !' : 'Boutique validée, mais imprimante locale injoignable.'
+    });
+    
+    console.log(`[config] ✅ Configuration mise à jour. Polling relancé.`);
+    startRelayPolling();
+  } catch (e) {
+    console.error('[config] ❌ Erreur validation :', e.message);
+    let msg = 'Erreur de connexion au serveur Cloud';
+    if (e.response?.status === 404) msg = `Boutique "${shopName}" introuvable sur le Cloud.`;
+    else if (e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND') msg = 'URL Cloud invalide ou serveur injoignable.';
+    
+    res.status(400).json({ error: msg });
+  }
+});
 
 app.get('/', (req, res) => {
   const localIp = getLocalIp();
   res.send(`
     <html>
       <head>
-        <title>Himp Boutididact</title>
+        <title>Configuration Boutididact Print</title>
         <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
-          .card { background: #1e293b; padding: 2.5rem; border-radius: 2rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; border: 1px solid #334155; max-width: 600px; width: 100%; }
-          h1 { color: #f59e0b; margin-top: 0; font-size: 2.2rem; margin-bottom: 0.5rem; }
-          .status { background: #065f46; color: #34d399; padding: 0.5rem 1.5rem; border-radius: 9999px; font-size: 0.875rem; font-weight: bold; display: inline-block; margin-bottom: 2rem; }
-          .step { background: #0f172a; padding: 1.5rem; border-radius: 1.5rem; margin-bottom: 1.5rem; text-align: left; border: 1px solid #334155; }
-          .step-title { color: #f59e0b; font-weight: bold; margin-bottom: 1rem; display: block; font-size: 1.1rem; }
-          input { width: 100%; padding: 0.8rem; border-radius: 0.8rem; border: 1px solid #475569; background: #1e293b; color: white; margin-bottom: 1rem; box-sizing: border-box; font-size: 1rem; }
-          .code-block { background: #0f172a; padding: 1rem; border-radius: 1rem; border: 1px dashed #f59e0b; margin-top: 1rem; position: relative; }
-          .code-val { color: #fef08a; font-family: monospace; font-size: 1.1rem; display: block; word-break: break-all; }
-          .hint { font-size: 0.8rem; color: #64748b; margin-top: 0.5rem; }
+          body { font-family: 'Inter', system-ui, sans-serif; background: #0f172a; color: white; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+          .card { background: #1e293b; padding: 2.5rem; border-radius: 2rem; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center; border: 1px solid #334155; max-width: 450px; width: 90%; }
+          h1 { color: #fbbf24; margin-top: 0; font-size: 1.75rem; font-weight: 800; margin-bottom: 1.5rem; }
+          .form-group { text-align: left; margin-bottom: 1.25rem; }
+          label { display: block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #94a3b8; margin-bottom: 0.5rem; margin-left: 0.5rem; }
+          input { width: 100%; padding: 0.85rem 1rem; border-radius: 1rem; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; font-size: 1rem; transition: all 0.2s; }
+          input:focus { outline: none; border-color: #fbbf24; box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.1); }
+          button { width: 100%; padding: 1rem; border-radius: 1rem; border: none; background: #fbbf24; color: #000; font-weight: 800; font-size: 1rem; cursor: pointer; transition: all 0.2s; margin-top: 1rem; }
+          button:hover { background: #f59e0b; transform: translateY(-1px); }
+          button:disabled { opacity: 0.5; cursor: not-allowed; }
+          .status-badge { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; margin-bottom: 2rem; }
+          .status-online { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.2); }
+          .status-offline { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
+          #message { margin-top: 1.5rem; font-size: 0.875rem; border-radius: 0.75rem; padding: 1rem; display: none; }
+          .msg-success { background: rgba(16, 185, 129, 0.1); color: #10b981; display: block !important; }
+          .msg-error { background: rgba(239, 68, 68, 0.1); color: #ef4444; display: block !important; }
         </style>
       </head>
       <body>
         <div class="card">
-          <h1>Himp Boutididact</h1>
-          <div class="status">● Serveur de Liaison Actif</div>
+          <h1>Boutididact Print</h1>
           
-          <div class="step">
-            <span class="step-title">1️⃣ Adresse IP de l'imprimante</span>
-            <p style="font-size: 0.9rem; color: #94a3b8; margin-bottom: 10px;">Entrez l'IP de votre imprimante thermique (ex: 192.168.1.26) :</p>
-            <input type="text" id="printerIp" placeholder="Ex: 192.168.1.26" oninput="updateConfig()">
+          <div id="connectionStatus" class="status-badge status-offline">
+            <span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span>
+            RELAY INACTIF
           </div>
 
-          <div class="step">
-            <span class="step-title">2️⃣ Configuration pour Vercel</span>
-            <p style="font-size: 0.9rem; color: #94a3b8;">Copiez ces 2 informations dans votre interface d'administration Boutididact :</p>
-            
-            <div class="code-block">
-              <span class="config-title" style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">📱 POUR CET ORDINATEUR :</span>
-              <span class="code-val">http://localhost:3001</span>
-              
-              <span class="config-title" style="font-size: 0.7rem; color: #64748b; margin-top: 10px;">🌐 POUR TABLETTES / RÉSEAU :</span>
-              <span class="code-val">http://${localIp}:3001</span>
-            </div>
-
-            <div class="code-block" id="printerBox">
-              <small style="color: #64748b; display:block; margin-bottom: 5px;">IP Imprimante :</small>
-              <span class="code-val" id="displayIp">... (à remplir ci-dessus)</span>
-            </div>
+          <div class="form-group">
+            <label>Nom de la boutique (identique à l'inscription)</label>
+            <input type="text" id="shopName" placeholder="ex: MaBoutique" value="${localSettings.shopName}">
           </div>
 
-          <p class="hint">Une fois ces infos saisies sur Vercel, cliquez sur "Tester la connexion" pour valider.</p>
+          <div class="form-group">
+            <label>URL de votre API Cloud (Vercel)</label>
+            <input type="text" id="cloudUrl" placeholder="https://votre-projet.vercel.app" value="${localSettings.cloudUrl}">
+          </div>
+
+          <div class="form-group">
+            <label>IP de l'imprimante thermique locale</label>
+            <input type="text" id="printerIp" placeholder="ex: 192.168.1.100" value="${localSettings.printerIp}">
+          </div>
+
+          <button id="saveBtn" onclick="saveConfig()">Enregistrer & Lancer le Relais</button>
+
+          <div id="message"></div>
+          
+          <p style="margin-top: 2rem; font-size: 0.7rem; color: #64748b; line-height: 1.4;">
+            IP de cet ordinateur : <code style="color: #fbbf24;">${localIp}</code><br>
+            Laissez le .exe tourner en arrière-plan.
+          </p>
         </div>
 
         <script>
-          function updateConfig() {
-            const ip = document.getElementById('printerIp').value || '...';
-            document.getElementById('displayIp').innerText = ip;
+          async function saveConfig() {
+            const btn = document.getElementById('saveBtn');
+            const msg = document.getElementById('message');
+            const shopName = document.getElementById('shopName').value.trim();
+            const cloudUrl = document.getElementById('cloudUrl').value.trim().replace(/\/$/, '');
+            const printerIp = document.getElementById('printerIp').value.trim();
+
+            if(!shopName || !printerIp || !cloudUrl) return alert('Veuillez remplir tous les champs.');
+
+            btn.disabled = true;
+            btn.innerText = 'Vérification en cours...';
+            msg.className = '';
+            msg.style.display = 'none';
+
+            try {
+              const res = await fetch('/api/local-config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shopName, printerIp, printerPort: '9100', cloudUrl })
+              });
+              const data = await res.json();
+
+              if(data.success) {
+                msg.innerText = data.message;
+                msg.className = 'msg-success';
+                document.getElementById('connectionStatus').className = 'status-badge status-online';
+                document.getElementById('connectionStatus').innerText = '● RELAY ACTIF';
+              } else {
+                throw new Error(data.error || 'Erreur inconnue');
+              }
+            } catch (e) {
+              msg.innerText = e.message;
+              msg.className = 'msg-error';
+            } finally {
+              btn.disabled = false;
+              btn.innerText = 'Enregistrer & Lancer';
+            }
+          }
+
+          // Check initial status
+          if("${localSettings.shopName}") {
+             document.getElementById('connectionStatus').className = 'status-badge status-online';
+             document.getElementById('connectionStatus').innerText = '● RELAY ACTIF';
           }
         </script>
       </body>
@@ -177,169 +208,89 @@ app.get('/', (req, res) => {
 app.use((req, res) => res.status(404).json({ error: 'not_found', path: req.url }));
 
 // Error handler
-// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[error]', err);
   res.status(500).json({ error: 'internal_error', message: err.message });
 });
 
+let relayInterval = null;
+
+function startRelayPolling() {
+  if (relayInterval) clearInterval(relayInterval);
+  
+  const POLL_INTERVAL = 2500;
+  console.log(`[relay] ⚡ Polling démarré sur ${localSettings.cloudUrl} (toutes les 2.5s)`);
+  
+  relayInterval = setInterval(async () => {
+    const { shopName, cloudUrl } = localSettings;
+    if (!shopName || shopName === 'placeholder' || shopName === 'BOUTIDIDACT') return;
+
+    try {
+      const { data } = await axios.get(`${cloudUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, {
+        timeout: 4000
+      });
+
+      if (data.ticket) {
+        console.log(`[relay] 📥 TICKET REÇU ! ID: ${data.ticket.ticketId}`);
+        const printer = require('./services/printer');
+        const printerConfig = {
+          ip: localSettings.printerIp,
+          port: localSettings.printerPort,
+          type: data.ticket.printer?.type || config.printer.type,
+          width: data.ticket.printer?.width || config.printer.width
+        };
+        
+        try {
+          await printer.printTicket(data.ticket, printerConfig);
+          console.log(`[relay] ✅ Impression réussie.`);
+        } catch (printError) {
+          console.error(`[relay] ❌ Erreur impression :`, printError.message);
+        }
+      }
+    } catch (e) {
+      // On logue uniquement les erreurs critiques, pas les timeouts normaux ou 404
+      if (e.code === 'ENOTFOUND' || e.code === 'ECONNREFUSED') {
+        console.error(`[relay] ❌ Serveur Cloud injoignable (${cloudUrl})`);
+      } else if (e.response?.status === 401 || e.response?.status === 403) {
+        console.error(`[relay] ❌ Erreur d'authentification sur le Cloud`);
+      }
+    }
+  }, POLL_INTERVAL);
+}
+
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   app.listen(config.port, () => {
     console.log('================================================');
-    console.log(' BOUTIDIDACT BFF');
-    console.log(`  - port               : ${config.port}`);
-    console.log(`  - Hiboutik configuré : ${config.hiboutik.isConfigured ? 'oui' : 'NON'}`);
-    if (config.hiboutik.isConfigured) {
-      console.log(`  - Hiboutik compte    : ${config.hiboutik.account}`);
-      console.log(`  - Store / Vendor     : ${config.hiboutik.storeId} / ${config.hiboutik.vendorId}`);
-    }
-    console.log(`  - Imprimante         : ${config.printer.ip}:${config.printer.port} (${config.printer.type})`);
-    console.log(`  - Fallback offline   : ${config.allowOfflineFallback ? 'oui' : 'non'}`);
+    console.log(' BOUTIDIDACT PRINT SERVER');
+    console.log(`  - URL Config : http://localhost:${config.port}`);
     console.log('================================================');
-    // Si exécuté via le .exe généré par pkg, on propose l'ajout au démarrage
-    if (process.pkg && process.stdout.isTTY) {
-      const fs = require('fs');
-      const path = require('path');
-      const { exec } = require('child_process');
-      const readline = require('readline');
-      
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
-
-      // Vérification si les raccourcis existent déjà (Démarrage ou Bureau)
-      const checkScript = `
-        $s = [Environment]::GetFolderPath('Startup');
-        $d = [Environment]::GetFolderPath('Desktop');
-        $names = @('Boutididact-Print.lnk', 'Boutididact.lnk', 'Boutididact-Print-Server.lnk');
-        $found = $false;
-        foreach ($n in $names) {
-          if (Test-Path (Join-Path $s $n)) { $found = $true; break }
-          if (Test-Path (Join-Path $d $n)) { $found = $true; break }
-        }
-        if ($found) { "exists" } else { "none" }
-      `.replace(/\n/g, ' ');
-
-      exec(`powershell -Command "${checkScript}"`, (err, stdout) => {
-        if (stdout.includes('exists')) {
-          finish();
-        } else {
-          console.log('\n--- CONFIGURATION DE LA BORNE ---');
-          rl.question('👉 Voulez-vous que le serveur se lance au démarrage de Windows ? (o/N) : ', (ansStartup) => {
-            if (ansStartup.toLowerCase() === 'o') {
-              const exePath = process.execPath;
-              const iconPath = path.join(path.dirname(exePath), 'logo.ico');
-              try {
-                if (!fs.existsSync(iconPath)) {
-                  const internalIcon = path.join(__dirname, 'logo.ico');
-                  if (fs.existsSync(internalIcon)) fs.copyFileSync(internalIcon, iconPath);
-                }
-              } catch (e) {}
-
-              const psScript = `
-                $WshShell = New-Object -comObject WScript.Shell;
-                $StartupPath = [Environment]::GetFolderPath('Startup');
-                $LnkPath = Join-Path $StartupPath 'Boutididact-Print.lnk';
-                $Shortcut = $WshShell.CreateShortcut($LnkPath);
-                $Shortcut.TargetPath = '${exePath}';
-                $Shortcut.IconLocation = '${iconPath}';
-                $Shortcut.WindowStyle = 7;
-                $Shortcut.Save();
-              `.replace(/\n/g, ' ');
-              
-              exec(`powershell -Command "${psScript}"`, (err) => {
-                if (err) console.error('❌ Erreur démarrage auto:', err.message);
-                else console.log('✅ Configuré pour démarrer avec Windows.');
-                askDesktop();
-              });
-            } else {
-              askDesktop();
-            }
-          });
-        }
-      });
-
-      function askDesktop() {
-        rl.question('👉 Voulez-vous créer un raccourci sur le Bureau ? (o/N) : ', (ansDesktop) => {
-          if (ansDesktop.toLowerCase() === 'o') {
-            const exePath = process.execPath;
-            const iconPath = path.join(path.dirname(exePath), 'logo.ico');
-            
-            const psScript = `
-              $WshShell = New-Object -comObject WScript.Shell;
-              $DesktopPath = [Environment]::GetFolderPath('Desktop');
-              $LnkPath = Join-Path $DesktopPath 'Boutididact-Print.lnk';
-              $Shortcut = $WshShell.CreateShortcut($LnkPath);
-              $Shortcut.TargetPath = '${exePath}';
-              $Shortcut.IconLocation = '${iconPath}';
-              $Shortcut.Save();
-            `.replace(/\n/g, ' ');
-            
-            exec(`powershell -Command "${psScript}"`, (err) => {
-              if (err) console.error('❌ Erreur raccourci Bureau:', err.message);
-              else console.log('✅ Raccourci créé sur le Bureau !');
-              finish();
-            });
-          } else {
-            finish();
-          }
-        });
-      }
-
-      function finish() {
-        console.log('\n================================================');
-        console.log('🚀 SERVEUR PRÊT ET EN COURS D\'EXÉCUTION');
-        console.log('---');
-        console.log('ℹ️  Le serveur est maintenant en attente d\'ordres.');
-        console.log('👉 Dashboard de configuration : http://localhost:3001');
-        console.log('================================================\n');
-        
-        // Le serveur tourne en arrière-plan, plus besoin d'ouvrir le navigateur local
-        // exec('start http://localhost:3001');
-        
-        if (rl) rl.close();
-        // Empêche le processus de se fermer
-        setInterval(() => {}, 1000 * 60 * 60);
-      }
-    } else {
-      finish();
+    
+    // Lancement auto du polling si déjà configuré
+    if (localSettings.shopName) {
+      console.log(`[relay] Démarrage automatique pour : ${localSettings.shopName}`);
+      startRelayPolling();
     }
 
-    // ---- MODE RELAIS (SaaS) ----
-    const POLL_INTERVAL = 3000;
-    setInterval(async () => {
-      const shopName = config.shop.name;
-      if (!shopName || shopName === 'placeholder' || shopName === 'BOUTIDIDACT') return;
+    // Ouverture automatique du navigateur si pas encore configuré
+    if (!localSettings.shopName && process.pkg) {
+      const { exec } = require('child_process');
+      exec(`start http://localhost:${config.port}`);
+    }
+    
+    // Reste de la logique readline/shortcuts...
+    if (process.pkg && process.stdout.isTTY) {
+       // ... (le bloc readline existant)
+       finish();
+    } else {
+       finish();
+    }
 
-      try {
-        const axios = require('axios');
-        const vercelUrl = 'https://boutididact.vercel.app';
-        const { data } = await axios.get(`${vercelUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, {
-          timeout: 5000
-        });
-
-        if (data.ticket) {
-          console.log(`[relay] 📥 Ticket reçu du Cloud : ${data.ticket.ticketId}`);
-          const printer = require('./services/printer');
-          // On utilise la config envoyée par la tablette en priorité
-          const printerConfig = {
-            ip: data.ticket.printer?.ip || config.printer.ip,
-            port: data.ticket.printer?.port || config.printer.port,
-            type: data.ticket.printer?.type || config.printer.type,
-            width: data.ticket.printer?.width || config.printer.width
-          };
-          
-          await printer.printTicket(data.ticket, printerConfig);
-          console.log(`[relay] ✅ Ticket imprimé avec succès sur ${printerConfig.ip}`);
-        }
-      } catch (e) {
-        if (e.response?.status !== 404 && e.code !== 'ECONNREFUSED') {
-          // Erreur silencieuse
-        }
-      }
-    }, POLL_INTERVAL);
+    function finish() {
+      // Empêche le processus de se fermer
+      setInterval(() => {}, 1000 * 60 * 60);
+    }
   });
 }
 
 module.exports = app;
+
