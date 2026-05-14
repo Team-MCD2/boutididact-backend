@@ -30,6 +30,7 @@ router.get('/', async (req, res) => {
       configured: hiboutik.isConfigured(req.hiboutikAuth),
       reachable: hiboutikStatus.ok,
       reason: hiboutikStatus.reason ?? null,
+      message: hiboutikStatus.message ?? null,
       account: req.hiboutikAuth?.account || config.hiboutik.account || null,
     },
     printer: {

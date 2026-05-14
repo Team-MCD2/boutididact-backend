@@ -70,7 +70,8 @@ const ping = async (auth = null) => {
     const { status } = await client.get('/stores', { timeout: 5_000 });
     return { ok: status >= 200 && status < 300 };
   } catch (e) {
-    return { ok: false, reason: e.response?.status || e.code || 'network_error' };
+    const err = formatError(e);
+    return { ok: false, reason: err.status, message: err.message };
   }
 };
 
