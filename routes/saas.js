@@ -666,7 +666,11 @@ router.post('/save-catalog', async (req, res) => {
     const customer = await findShopByName(stripe, shopName);
     if (!customer) return res.status(404).json({ error: 'shop_not_found' });
 
-    const catalogJson = JSON.stringify({ products: products || [], categories: categories || [] });
+    const catalogJson = JSON.stringify({ 
+      products: products || [], 
+      categories: categories || [],
+      supplements: supplements || [] 
+    });
     const CHUNK_SIZE = 450;
     const chunks = {};
     const cleanMetadata = {};
@@ -710,8 +714,12 @@ router.get('/get-catalog', async (req, res) => {
     }
 
     const catalog = JSON.parse(fullJson);
-    console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits)`);
-    res.json({ products: catalog.products || [], categories: catalog.categories || [] });
+    console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits, ${(catalog.supplements || []).length} suppléments)`);
+    res.json({ 
+      products: catalog.products || [], 
+      categories: catalog.categories || [],
+      supplements: catalog.supplements || []
+    });
   } catch (e) {
     console.error('[saas] get-catalog:', e.message);
     res.status(500).json({ error: e.message });
