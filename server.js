@@ -29,7 +29,8 @@ const printRouter = require('./routes/print');
 const saasRouter = require('./routes/saas');
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // ---- Middleware Auth Hiboutik Multi-tenant ----
 app.use((req, res, next) => {
@@ -117,9 +118,7 @@ app.get('/api/local-config', (req, res) => {
   res.json(localSettings);
 });
 
-app.get('/api/local-config', (req, res) => {
-  res.json(localSettings);
-});
+
 
 app.post('/api/local-config', async (req, res) => {
   const { shopName, printerIp, printerPort, cloudUrl } = req.body;
@@ -146,7 +145,7 @@ app.post('/api/local-config', async (req, res) => {
     localSettings.activeShop = shopName;
     saveLocalSettings();
 
-    res.json({ success: true, message: 'Boutique ajoutée/mise à jour !' });
+    return res.json({ success: true, message: 'Boutique ajoutée/mise à jour !' });
     startRelayPolling();
   } catch (e) {
     console.error('[config] ❌ Erreur :', e.message);
@@ -236,7 +235,7 @@ app.get('/', (req, res) => {
               <input type="text" id="shopName" placeholder="ex: MaBoutique">
             </div>
 
-            <div class="form-group">
+            <div class="form-group" style="display: none;">
               <label>URL Cloud (Vercel)</label>
               <input type="text" id="cloudUrl" placeholder="https://...vercel.app" value="https://boutididact-backendd.vercel.app">
             </div>
@@ -374,6 +373,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'internal_error', message: err.message });
 });
 
+const POLL_INTERVAL = 5000;
 let relayInterval = null;
 
 function startRelayPolling() {
