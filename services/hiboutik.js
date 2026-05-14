@@ -252,7 +252,7 @@ const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' 
   }
 };
 
-const addItem = async (saleId, { productId, quantity, sizeId, price }, auth = null) => {
+const addItem = async (saleId, { productId, quantity, sizeId, price, productComment }, auth = null) => {
   const client = buildClient(auth);
   if (!client) throw new Error('Boutididact non configuré');
 
@@ -265,6 +265,7 @@ const addItem = async (saleId, { productId, quantity, sizeId, price }, auth = nu
       stock_withdrawal: '1',
     };
     if (typeof price === 'number' && Number.isFinite(price)) p.product_price = Number(price).toFixed(2);
+    if (productComment) p.product_comment = String(productComment);
     return p;
   };
 
