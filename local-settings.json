@@ -2,12 +2,6 @@
   "activeShop": "cypriano",
   "shops": [
     {
-      "shopName": "microdidact",
-      "printerIp": "192.168.1.26",
-      "printerPort": "9100",
-      "cloudUrl": "https://boutididact-backendd.vercel.app"
-    },
-    {
       "shopName": "cypriano",
       "printerIp": "192.168.1.26",
       "printerPort": "9100",

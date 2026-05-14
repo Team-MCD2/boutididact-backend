@@ -651,4 +651,71 @@ router.post('/send-setup-email', async (req, res) => {
   }
 });
 
+// ============================================================
+// CATALOG PERSISTENCE (Cloud sync for AI-imported catalog)
+// ============================================================
+
+router.post('/save-catalog', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName, products, categories } = req.body || {};
+  if (!shopName) return res.status(400).json({ error: 'missing_data' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    const catalogJson = JSON.stringify({ products: products || [], categories: categories || [] });
+    const CHUNK_SIZE = 450;
+    const chunks = {};
+    const cleanMetadata = {};
+    for (let i = 1; i <= 20; i++) cleanMetadata[`cat_${i}`] = '';
+
+    for (let i = 0; i < catalogJson.length; i += CHUNK_SIZE) {
+      const part = Math.floor(i / CHUNK_SIZE) + 1;
+      if (part > 20) break;
+      chunks[`cat_${part}`] = catalogJson.substring(i, i + CHUNK_SIZE);
+    }
+
+    await stripe.customers.update(customer.id, {
+      metadata: { ...cleanMetadata, ...chunks, cat_count: String(Object.keys(chunks).length) }
+    });
+
+    console.log(`[saas] Catalogue sauvegardé pour ${shopName} (${catalogJson.length} chars, ${Object.keys(chunks).length} chunks)`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[saas] save-catalog:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/get-catalog', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName } = req.query;
+  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    const count = parseInt(customer.metadata?.cat_count || '0');
+    if (count === 0) return res.json({ products: [], categories: [] });
+
+    let fullJson = '';
+    for (let i = 1; i <= count; i++) {
+      fullJson += (customer.metadata[`cat_${i}`] || '');
+    }
+
+    const catalog = JSON.parse(fullJson);
+    console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits)`);
+    res.json({ products: catalog.products || [], categories: catalog.categories || [] });
+  } catch (e) {
+    console.error('[saas] get-catalog:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 module.exports = router;
