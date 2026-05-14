@@ -303,6 +303,7 @@ router.post('/login', async (req, res) => {
     res.json({
       ok: true,
       shop: {
+        id: customer.id,
         name: customer.metadata.boutiqueName,
         email: customer.metadata.boutiqueEmail || customer.email || '',
         settings: customer.metadata.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null
@@ -490,12 +491,12 @@ router.post('/save-settings', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
 
-  const { shopName, settings } = req.body || {};
-  if (!shopName || !settings) return res.status(400).json({ error: 'missing_data' });
+  const { shopId, shopName, settings } = req.body || {};
+  if (!(shopId || shopName) || !settings) return res.status(400).json({ error: 'missing_data' });
 
   try {
-    const customer = await findShopByName(stripe, shopName);
-    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+    const customer = shopId ? await stripe.customers.retrieve(shopId) : await findShopByName(stripe, shopName);
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
 
     await stripe.customers.update(customer.id, {
       metadata: {
@@ -514,12 +515,12 @@ router.get('/get-settings', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
 
-  const { shopName } = req.query;
-  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+  const { shopId, shopName } = req.query;
+  if (!shopId && !shopName) return res.status(400).json({ error: 'missing_identifier' });
 
   try {
-    const customer = await findShopByName(stripe, shopName);
-    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+    const customer = shopId ? await stripe.customers.retrieve(shopId) : await findShopByName(stripe, shopName);
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
 
     const settings = customer.metadata?.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null;
     res.json({ ok: true, settings });
@@ -659,12 +660,12 @@ router.post('/save-catalog', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
 
-  const { shopName, products, categories } = req.body || {};
-  if (!shopName) return res.status(400).json({ error: 'missing_data' });
+  const { shopId, shopName, products, categories, supplements } = req.body || {};
+  if (!shopId && !shopName) return res.status(400).json({ error: 'missing_identifier' });
 
   try {
-    const customer = await findShopByName(stripe, shopName);
-    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+    const customer = shopId ? await stripe.customers.retrieve(shopId) : await findShopByName(stripe, shopName);
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
 
     const catalogJson = JSON.stringify({ 
       products: products || [], 
@@ -698,12 +699,12 @@ router.get('/get-catalog', async (req, res) => {
   const stripe = getStripe();
   if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
 
-  const { shopName } = req.query;
-  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+  const { shopId, shopName } = req.query;
+  if (!shopId && !shopName) return res.status(400).json({ error: 'missing_identifier' });
 
   try {
-    const customer = await findShopByName(stripe, shopName);
-    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+    const customer = shopId ? await stripe.customers.retrieve(shopId) : await findShopByName(stripe, shopName);
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
 
     const count = parseInt(customer.metadata?.cat_count || '0');
     if (count === 0) return res.json({ products: [], categories: [] });
