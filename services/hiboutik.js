@@ -40,7 +40,7 @@ const formatError = (e) => {
 };
 
 const buildClient = (overrides = null) => {
-  const account = overrides?.account || config.hiboutik.account;
+  const account = (overrides?.account || config.hiboutik.account || '').replace(/\.hiboutik\.com$/i, '');
   const user = overrides?.user || config.hiboutik.user;
   const apiKey = overrides?.apiKey || config.hiboutik.apiKey;
   const baseURL = account ? `https://${account}.hiboutik.com/api` : config.hiboutik.baseURL;
