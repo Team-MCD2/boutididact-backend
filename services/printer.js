@@ -82,7 +82,7 @@ const printTicket = async (ticket = {}, printerAuth = null) => {
   const dateStr = now.toLocaleDateString('fr-FR');
   const timeStr = now.toLocaleTimeString('fr-FR');
   printer.leftRight(`Ticket : ${ticket.ticketId || `T-${Date.now()}`}`, dateStr);
-  if (ticket.saleId) printer.leftRight(`Vente Hiboutik : #${ticket.saleId}`, timeStr);
+  if (ticket.saleId) printer.leftRight(`Vente Boutididact : #${ticket.saleId}`, timeStr);
   else printer.leftRight('', timeStr);
   printer.drawLine();
 
