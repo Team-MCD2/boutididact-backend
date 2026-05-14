@@ -55,6 +55,7 @@ const config = {
   },
 
   allowOfflineFallback: toBool(process.env.ALLOW_OFFLINE_FALLBACK),
+  adminPassword: optional('ADMIN_PASSWORD', '0000'),
 };
 
 config.hiboutik.isConfigured = Boolean(

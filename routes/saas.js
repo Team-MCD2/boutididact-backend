@@ -605,4 +605,50 @@ router.get('/poll-ticket', async (req, res) => {
   }
 });
 
+// ============================================================
+// ADMIN : Envoi des identifiants au client
+// ============================================================
+router.post('/send-setup-email', async (req, res) => {
+  const { password, to, shopName, hiboutikAccount, hiboutikUser, hiboutikApiKey } = req.body || {};
+  
+  if (password !== config.adminPassword) {
+    return res.status(401).json({ error: 'invalid_password', message: 'Mot de passe administrateur incorrect.' });
+  }
+
+  if (!to || !shopName || !hiboutikAccount || !hiboutikUser || !hiboutikApiKey) {
+    return res.status(400).json({ error: 'missing_fields', message: 'Tous les champs sont requis.' });
+  }
+
+  if (!transporter) {
+    return res.status(503).json({ error: 'email_not_configured', message: 'Service e-mail non configuré sur le serveur.' });
+  }
+
+  try {
+    await transporter.sendMail({
+      from: `"BOUTIDIDACT Support" <${process.env.SMTP_USER}>`,
+      to,
+      subject: `🗝️ Vos identifiants BOUTIDIDACT pour ${shopName}`,
+      html: `
+        <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+          <h2 style="color: #4f46e5;">Bonjour ${shopName},</h2>
+          <p>Voici les identifiants à renseigner dans les <strong>Paramètres</strong> de votre borne Boutididact pour activer la synchronisation avec votre catalogue :</p>
+          
+          <div style="background: #f9fafb; padding: 15px; border-radius: 8px; border: 1px solid #e5e7eb; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Compte :</strong> ${hiboutikAccount}</p>
+            <p style="margin: 5px 0;"><strong>Utilisateur API :</strong> ${hiboutikUser}</p>
+            <p style="margin: 5px 0;"><strong>Clé API :</strong> ${hiboutikApiKey}</p>
+          </div>
+
+          <p>Une fois ces informations saisies, n'oubliez pas de cliquer sur <strong>Enregistrer</strong>. Votre borne sera alors opérationnelle.</p>
+          <p>L'équipe BOUTIDIDACT</p>
+        </div>`,
+    });
+
+    res.json({ ok: true, message: 'E-mail envoyé avec succès.' });
+  } catch (error) {
+    console.error('[saas] send-setup-email:', error.message);
+    res.status(500).json({ error: 'email_error', message: `Erreur lors de l'envoi : ${error.message}` });
+  }
+});
+
 module.exports = router;
