@@ -80,18 +80,27 @@ app.use('/api/saas', saasRouter);
 // ---- Gestion des paramètres locaux ----
 const SETTINGS_PATH = path.join(process.cwd(), 'local-settings.json');
 let localSettings = { 
-  shopName: '', 
-  printerIp: '192.168.1.100', 
-  printerPort: '9100', 
-  cloudUrl: 'https://boutididact-backendd.vercel.app' 
+  activeShop: '', // Nom de la boutique actuellement sélectionnée
+  shops: []       // Liste des boutiques configurées : { shopName, printerIp, printerPort, cloudUrl }
 };
 
 function loadLocalSettings() {
   if (fs.existsSync(SETTINGS_PATH)) {
     try {
       const data = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-      localSettings = { ...localSettings, ...data };
-      console.log('[config] Paramètres locaux chargés :', localSettings.shopName);
+      // Migration si ancien format
+      if (data.shopName && !data.shops) {
+        localSettings.shops = [{
+          shopName: data.shopName,
+          printerIp: data.printerIp,
+          printerPort: data.printerPort,
+          cloudUrl: data.cloudUrl
+        }];
+        localSettings.activeShop = data.shopName;
+      } else {
+        localSettings = { ...localSettings, ...data };
+      }
+      console.log('[config] Paramètres chargés. Boutique active :', localSettings.activeShop);
     } catch (e) {
       console.error('[config] Erreur lecture local-settings.json');
     }
@@ -99,12 +108,15 @@ function loadLocalSettings() {
 }
 loadLocalSettings();
 
-function saveLocalSettings(settings) {
-  localSettings = { ...localSettings, ...settings };
+function saveLocalSettings() {
   fs.writeFileSync(SETTINGS_PATH, JSON.stringify(localSettings, null, 2));
 }
 
 // ---- Routes de configuration locale ----
+app.get('/api/local-config', (req, res) => {
+  res.json(localSettings);
+});
+
 app.get('/api/local-config', (req, res) => {
   res.json(localSettings);
 });
@@ -115,34 +127,53 @@ app.post('/api/local-config', async (req, res) => {
   if (!shopName) return res.status(400).json({ error: 'Nom de boutique requis' });
 
   try {
-    // 1. Vérifier si la boutique existe sur le Cloud
-    const targetUrl = cloudUrl || localSettings.cloudUrl;
-    console.log(`[config] Vérification de la boutique "${shopName}" sur ${targetUrl}...`);
+    const targetUrl = cloudUrl || 'https://boutididact-backendd.vercel.app';
+    console.log(`[config] Validation boutique "${shopName}" sur ${targetUrl}...`);
     
-    const testRes = await axios.get(`${targetUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, { timeout: 8000 });
+    // Vérification sur le Cloud
+    await axios.get(`${targetUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, { timeout: 8000 });
     
-    // 2. Tester l'imprimante
-    const printer = require('./services/printer');
-    const printerOnline = await printer.checkOnline({ ip: printerIp, port: printerPort });
+    // Mise à jour de la liste des boutiques
+    const newShop = { shopName, printerIp, printerPort, cloudUrl: targetUrl };
+    const index = localSettings.shops.findIndex(s => s.shopName.toLowerCase() === shopName.toLowerCase());
+    
+    if (index >= 0) {
+      localSettings.shops[index] = newShop;
+    } else {
+      localSettings.shops.push(newShop);
+    }
+    
+    localSettings.activeShop = shopName;
+    saveLocalSettings();
 
-    saveLocalSettings({ shopName, printerIp, printerPort, cloudUrl: targetUrl });
-
-    res.json({ 
-      success: true, 
-      printerOnline,
-      message: printerOnline ? 'Configuration enregistrée et validée !' : 'Boutique validée, mais imprimante locale injoignable.'
-    });
-    
-    console.log(`[config] ✅ Configuration mise à jour. Polling relancé.`);
+    res.json({ success: true, message: 'Boutique ajoutée/mise à jour !' });
     startRelayPolling();
   } catch (e) {
-    console.error('[config] ❌ Erreur validation :', e.message);
-    let msg = 'Erreur de connexion au serveur Cloud';
-    if (e.response?.status === 404) msg = `Boutique "${shopName}" introuvable sur le Cloud.`;
-    else if (e.code === 'ECONNREFUSED' || e.code === 'ENOTFOUND') msg = 'URL Cloud invalide ou serveur injoignable.';
-    
-    res.status(400).json({ error: msg });
+    console.error('[config] ❌ Erreur :', e.message);
+    res.status(400).json({ error: e.response?.status === 404 ? `Boutique "${shopName}" introuvable.` : e.message });
   }
+});
+
+app.post('/api/switch-shop', (req, res) => {
+  const { shopName } = req.body;
+  const shop = localSettings.shops.find(s => s.shopName === shopName);
+  if (!shop) return res.status(404).json({ error: 'Boutique non configurée localement' });
+  
+  localSettings.activeShop = shopName;
+  saveLocalSettings();
+  startRelayPolling();
+  res.json({ success: true, activeShop: shopName });
+});
+
+app.post('/api/delete-shop', (req, res) => {
+  const { shopName } = req.body;
+  localSettings.shops = localSettings.shops.filter(s => s.shopName !== shopName);
+  if (localSettings.activeShop === shopName) {
+    localSettings.activeShop = localSettings.shops[0]?.shopName || '';
+  }
+  saveLocalSettings();
+  startRelayPolling();
+  res.json({ success: true });
 });
 
 app.get('/', (req, res) => {
@@ -188,86 +219,145 @@ app.get('/', (req, res) => {
             RELAY INACTIF
           </div>
 
-          <div class="form-group">
-            <label>Nom de la boutique (identique à l'inscription)</label>
-            <input type="text" id="shopName" placeholder="ex: MaBoutique" value="${localSettings.shopName || ''}">
+          <div class="form-group" id="shopSelectorGroup" style="display: none;">
+            <label>Boutique active</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <select id="shopSelector" onchange="switchShop()" style="flex: 1; padding: 0.85rem; border-radius: 1rem; background: #0f172a; color: white; border: 1px solid #334155;"></select>
+              <button onclick="deleteShop()" style="width: auto; margin: 0; padding: 0.5rem 1rem; background: #ef4444; color: white;">🗑️</button>
+            </div>
+            <p style="text-align: right; margin-top: 0.5rem;">
+              <button onclick="showAddForm()" style="width: auto; margin: 0; padding: 0.25rem 0.75rem; font-size: 0.75rem; background: #334155; color: #94a3b8;">+ Ajouter une autre boutique</button>
+            </p>
           </div>
 
-          <div class="form-group">
-            <label>URL de votre API Cloud (Vercel)</label>
-            <input type="text" id="cloudUrl" placeholder="https://votre-projet.vercel.app" value="${localSettings.cloudUrl || ''}">
-          </div>
+          <div id="addShopForm" style="display: none;">
+            <div class="form-group">
+              <label>Nom de la boutique</label>
+              <input type="text" id="shopName" placeholder="ex: MaBoutique">
+            </div>
 
-          <div class="form-group">
-            <label>IP de l'imprimante thermique locale</label>
-            <input type="text" id="printerIp" placeholder="ex: 192.168.1.100" value="${localSettings.printerIp || ''}">
-          </div>
+            <div class="form-group">
+              <label>URL Cloud (Vercel)</label>
+              <input type="text" id="cloudUrl" placeholder="https://...vercel.app" value="https://boutididact-backendd.vercel.app">
+            </div>
 
-          <button id="saveBtn" onclick="saveConfig()">Enregistrer & Lancer le Relais</button>
+            <div class="form-group">
+              <label>IP Imprimante Locale</label>
+              <input type="text" id="printerIp" placeholder="192.168.1.100">
+            </div>
+
+            <button id="saveBtn" onclick="saveConfig()">Valider & Ajouter</button>
+            <button onclick="hideAddForm()" style="background: transparent; color: #94a3b8; font-size: 0.8rem; margin-top: 0.5rem; text-decoration: underline; border: none; cursor: pointer;">Annuler</button>
+          </div>
 
           <div id="message"></div>
           
           <p style="margin-top: 2rem; font-size: 0.7rem; color: #64748b; line-height: 1.4;">
             IP de cet ordinateur : <code style="color: #fbbf24;">${localIp}</code><br>
-            Laissez le .exe tourner en arrière-plan.
+            Multi-boutiques : <span id="shopCount">0</span> configurée(s)
           </p>
         </div>
 
         <script>
-          // On récupère la config injectée proprement
-          var config = ${initialConfig};
+          let settings = ${JSON.stringify(localSettings)};
+
+          function render() {
+            const selector = document.getElementById('shopSelector');
+            const group = document.getElementById('shopSelectorGroup');
+            const count = document.getElementById('shopCount');
+            const addForm = document.getElementById('addShopForm');
+            
+            count.innerText = settings.shops.length;
+            
+            if (settings.shops.length > 0) {
+              selector.innerHTML = settings.shops.map(s => 
+                '<option value="' + s.shopName + '" ' + (s.shopName === settings.activeShop ? 'selected' : '') + '>' + s.shopName + '</option>'
+              ).join('');
+              group.style.display = 'block';
+              addForm.style.display = settings.activeShop ? 'none' : 'block';
+            } else {
+              group.style.display = 'none';
+              addForm.style.display = 'block';
+            }
+            
+            setStatus(!!settings.activeShop);
+          }
 
           function setStatus(online) {
             var el = document.getElementById('connectionStatus');
-            if (online) {
-              el.className = 'status-badge status-online';
-              el.innerHTML = '<span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span> RELAY ACTIF';
-            } else {
-              el.className = 'status-badge status-offline';
-              el.innerHTML = '<span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span> RELAY INACTIF';
+            el.className = online ? 'status-badge status-online' : 'status-badge status-offline';
+            el.innerHTML = '<span style="width: 8px; height: 8px; background: currentColor; border-radius: 50%;"></span> ' + (online ? 'RELAY ACTIF ('+settings.activeShop+')' : 'RELAY INACTIF');
+          }
+
+          function showAddForm() { 
+            document.getElementById('addShopForm').style.display = 'block';
+            document.getElementById('shopSelectorGroup').style.display = 'none';
+          }
+          function hideAddForm() { 
+            document.getElementById('addShopForm').style.display = 'none';
+            document.getElementById('shopSelectorGroup').style.display = 'block';
+          }
+
+          async function switchShop() {
+            const name = document.getElementById('shopSelector').value;
+            const res = await fetch('/api/switch-shop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shopName: name })
+            });
+            const data = await res.json();
+            if (data.success) {
+              settings.activeShop = data.activeShop;
+              render();
             }
           }
 
-          if (config.shopName) setStatus(true);
+          async function deleteShop() {
+            const name = document.getElementById('shopSelector').value;
+            if (!confirm('Supprimer '+name+' de ce PC ?')) return;
+            const res = await fetch('/api/delete-shop', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ shopName: name })
+            });
+            window.location.reload();
+          }
 
           async function saveConfig() {
             var btn = document.getElementById('saveBtn');
             var msg = document.getElementById('message');
             var shopName = document.getElementById('shopName').value.trim();
-            var cloudUrl = document.getElementById('cloudUrl').value.trim().replace(/\\/$/, '');
+            var cloudUrl = document.getElementById('cloudUrl').value.trim();
             var printerIp = document.getElementById('printerIp').value.trim();
 
             if(!shopName || !printerIp || !cloudUrl) return alert('Veuillez remplir tous les champs.');
 
             btn.disabled = true;
-            btn.innerText = 'Vérification en cours...';
-            msg.className = '';
             msg.style.display = 'none';
 
             try {
               var res = await fetch('/api/local-config', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ shopName: shopName, printerIp: printerIp, printerPort: '9100', cloudUrl: cloudUrl })
+                body: JSON.stringify({ shopName, printerIp, printerPort: '9100', cloudUrl })
               });
               var data = await res.json();
 
               if(data.success) {
-                msg.innerText = data.message;
-                msg.className = 'msg-success';
-                setStatus(true);
+                window.location.reload();
               } else {
                 throw new Error(data.error || 'Erreur inconnue');
               }
             } catch (e) {
               msg.innerText = e.message;
               msg.className = 'msg-error';
-              setStatus(false);
+              msg.style.display = 'block';
             } finally {
               btn.disabled = false;
-              btn.innerText = 'Enregistrer & Lancer le Relais';
             }
           }
+
+          render();
         </script>
       </body>
     </html>
@@ -289,12 +379,13 @@ let relayInterval = null;
 function startRelayPolling() {
   if (relayInterval) clearInterval(relayInterval);
   
-  const POLL_INTERVAL = 2500;
-  console.log(`[relay] ⚡ Polling démarré sur ${localSettings.cloudUrl} (toutes les 2.5s)`);
-  
   relayInterval = setInterval(async () => {
-    const { shopName, cloudUrl } = localSettings;
-    if (!shopName || shopName === 'placeholder' || shopName === 'BOUTIDIDACT') return;
+    const activeShopName = localSettings.activeShop;
+    const shop = localSettings.shops.find(s => s.shopName === activeShopName);
+    
+    if (!shop) return;
+
+    const { shopName, cloudUrl, printerIp, printerPort } = shop;
 
     try {
       const { data } = await axios.get(`${cloudUrl}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, {
@@ -302,28 +393,25 @@ function startRelayPolling() {
       });
 
       if (data.ticket) {
-        console.log(`[relay] 📥 TICKET REÇU ! ID: ${data.ticket.ticketId}`);
+        console.log(`[relay] 📥 TICKET REÇU pour ${shopName} ! ID: ${data.ticket.ticketId}`);
         const printer = require('./services/printer');
         const printerConfig = {
-          ip: localSettings.printerIp,
-          port: localSettings.printerPort,
+          ip: printerIp,
+          port: printerPort,
           type: data.ticket.printer?.type || config.printer.type,
           width: data.ticket.printer?.width || config.printer.width
         };
         
         try {
           await printer.printTicket(data.ticket, printerConfig);
-          console.log(`[relay] ✅ Impression réussie.`);
+          console.log(`[relay] ✅ Impression réussie pour ${shopName}.`);
         } catch (printError) {
-          console.error(`[relay] ❌ Erreur impression :`, printError.message);
+          console.error(`[relay] ❌ Erreur impression (${shopName}) :`, printError.message);
         }
       }
     } catch (e) {
-      // On logue uniquement les erreurs critiques, pas les timeouts normaux ou 404
       if (e.code === 'ENOTFOUND' || e.code === 'ECONNREFUSED') {
         console.error(`[relay] ❌ Serveur Cloud injoignable (${cloudUrl})`);
-      } else if (e.response?.status === 401 || e.response?.status === 403) {
-        console.error(`[relay] ❌ Erreur d'authentification sur le Cloud`);
       }
     }
   }, POLL_INTERVAL);
@@ -337,13 +425,13 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
     console.log('================================================');
     
     // Lancement auto du polling si déjà configuré
-    if (localSettings.shopName) {
-      console.log(`[relay] Démarrage automatique pour : ${localSettings.shopName}`);
+    if (localSettings.activeShop) {
+      console.log(`[relay] Démarrage automatique pour : ${localSettings.activeShop}`);
       startRelayPolling();
     }
 
-    // Ouverture automatique du navigateur si pas encore configuré
-    if (!localSettings.shopName && process.pkg) {
+    // Ouverture automatique du navigateur si pas encore de boutique active
+    if (!localSettings.activeShop && process.pkg) {
       const { exec } = require('child_process');
       exec(`start http://localhost:${config.port}`);
     }
