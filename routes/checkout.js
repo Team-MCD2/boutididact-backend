@@ -85,16 +85,19 @@ router.post('/', async (req, res) => {
       // 0. Pré-provisionne dans Hiboutik les produits "locaux" (IDs non numériques type "local-xxx")
       stage = 'provision_local_products';
       let fallbackCategoryId = null;
-      for (const it of items) {
+      
+      // On pré-résout la catégorie si besoin
+      const needsProvision = items.some(it => String(it.productId ?? it.id).startsWith('ai-'));
+      if (needsProvision) {
+        fallbackCategoryId = await hiboutik.getFallbackCategoryId(req.hiboutikAuth);
+      }
+
+      await Promise.all(items.map(async (it) => {
         const rawId = String(it.productId ?? it.id);
         const isAiProduct = rawId.startsWith('ai-');
         const numericId = Number(rawId);
 
         if (isAiProduct) {
-          // Produit IA : on le crée dans Hiboutik car il n'existe pas
-          if (!fallbackCategoryId) {
-            fallbackCategoryId = await hiboutik.getFallbackCategoryId(req.hiboutikAuth);
-          }
           const hbId = await hiboutik.createProduct({
             name: it.name || 'Produit',
             price: Number(it.price),
@@ -104,17 +107,14 @@ router.post('/', async (req, res) => {
           it._resolvedProductId = hbId;
           it._productComment = null;
         } else if (isNaN(numericId) || numericId <= 0) {
-          // Produit existant mais avec customisation (ex: 500-no-emmental)
-          // On utilise l'ID de base et on met la customisation en commentaire
           const baseId = Number(rawId.split('-')[0]);
           it._resolvedProductId = baseId;
-          it._productComment = it.name; // Le nom contient déjà le "(Sans ...)"
+          it._productComment = it.name;
         } else {
-          // Produit Hiboutik standard sans modif d'ID
           it._resolvedProductId = numericId;
           it._productComment = null;
         }
-      }
+      }));
 
       stage = 'create';
       const created = await hiboutik.createSale({ vendorId, storeId, customerId }, req.hiboutikAuth);

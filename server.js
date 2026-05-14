@@ -144,9 +144,9 @@ app.post('/api/local-config', async (req, res) => {
     
     localSettings.activeShop = shopName;
     saveLocalSettings();
+    startRelayPolling();
 
     return res.json({ success: true, message: 'Boutique ajoutée/mise à jour !' });
-    startRelayPolling();
   } catch (e) {
     console.error('[config] ❌ Erreur :', e.message);
     res.status(400).json({ error: e.response?.status === 404 ? `Boutique "${shopName}" introuvable.` : e.message });
