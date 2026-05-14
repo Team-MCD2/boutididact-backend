@@ -94,7 +94,7 @@ router.post('/stripe-checkout', async (req, res) => {
     return res.status(501).json({ error: 'stripe_not_configured', message: 'Clé Stripe manquante sur le serveur.' });
   }
 
-  const { boutiqueName, boutiqueEmail, boutiquePassword } = req.body || {};
+  const { boutiqueName, boutiqueEmail, boutiquePassword, boutiquePhone } = req.body || {};
   if (!boutiqueName || !boutiqueEmail || !boutiquePassword) {
     return res.status(400).json({ error: 'missing_fields', message: 'Nom, email et mot de passe requis.' });
   }
@@ -162,6 +162,7 @@ router.post('/stripe-checkout', async (req, res) => {
         boutiqueNameLower: boutiqueName.toLowerCase(),
         boutiqueEmail,
         boutiquePassword,
+        boutiquePhone: boutiquePhone || '',
       },
       subscription_data: {
         metadata: {
@@ -169,6 +170,7 @@ router.post('/stripe-checkout', async (req, res) => {
           boutiqueNameLower: boutiqueName.toLowerCase(),
           boutiqueEmail,
           boutiquePassword,
+          boutiquePhone: boutiquePhone || '',
         },
       },
       mode: 'subscription',
@@ -216,6 +218,7 @@ router.get('/verify-subscription', async (req, res) => {
           boutiqueNameLower: (meta.boutiqueName || '').toLowerCase(),
           boutiqueEmail: meta.boutiqueEmail || '',
           boutiquePassword: meta.boutiquePassword || '',
+          boutiquePhone: meta.boutiquePhone || existing.metadata?.boutiquePhone || '',
           paidAt: existing.metadata?.paidAt || new Date().toISOString(),
         },
       });
@@ -324,9 +327,9 @@ router.post('/delete-account', async (req, res) => {
     return res.status(501).json({ error: 'stripe_not_configured', message: 'Service indisponible.' });
   }
 
-  const { shopName, email } = req.body || {};
-  if (!shopName || !email) {
-    return res.status(400).json({ error: 'missing_fields', message: 'Nom de boutique et email associés requis.' });
+  const { shopName, email, password } = req.body || {};
+  if (!shopName || !email || !password) {
+    return res.status(400).json({ error: 'missing_fields', message: 'Nom de boutique, email et mot de passe requis.' });
   }
 
   try {
@@ -334,6 +337,11 @@ router.post('/delete-account', async (req, res) => {
     const linkedEmail = (customer?.metadata?.boutiqueEmail || customer?.email || '').toLowerCase();
     if (!customer || linkedEmail !== email.trim().toLowerCase()) {
       return res.status(404).json({ error: 'not_found', message: 'Aucune boutique ne correspond à ce nom et cet email.' });
+    }
+
+    // Vérification du mot de passe
+    if (!customer.metadata || customer.metadata.boutiquePassword !== password) {
+      return res.status(401).json({ error: 'invalid_password', message: 'Mot de passe incorrect.' });
     }
 
     // 1) Annuler toutes les souscriptions actives du customer
@@ -649,6 +657,93 @@ router.post('/send-setup-email', async (req, res) => {
   } catch (error) {
     console.error('[saas] send-setup-email:', error.message);
     res.status(500).json({ error: 'email_error', message: `Erreur lors de l'envoi : ${error.message}` });
+  }
+});
+
+// ============================================================
+// SUPER ADMIN : Liste et gestion des boutiques
+// ============================================================
+
+router.get('/list-shops', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { password } = req.query;
+  if (password !== config.adminPassword) {
+    return res.status(401).json({ error: 'invalid_password', message: 'Mot de passe administrateur incorrect.' });
+  }
+
+  try {
+    // Récupère tous les clients Stripe qui ont un boutiqueName
+    const allCustomers = [];
+    let hasMore = true;
+    let startingAfter = undefined;
+    
+    while (hasMore) {
+      const params = { limit: 100 };
+      if (startingAfter) params.starting_after = startingAfter;
+      const batch = await stripe.customers.list(params);
+      
+      for (const c of batch.data) {
+        if (c.metadata?.boutiqueName) {
+          allCustomers.push({
+            id: c.id,
+            name: c.metadata.boutiqueName,
+            email: c.metadata.boutiqueEmail || c.email || '',
+            phone: c.metadata.boutiquePhone || '',
+            paidAt: c.metadata.paidAt || null,
+            createdAt: new Date(c.created * 1000).toISOString(),
+            notes: c.metadata.adminNotes || '',
+            address: c.metadata.boutiqueAddress || '',
+            city: c.metadata.boutiqueCity || '',
+            siret: c.metadata.boutiqueSiret || '',
+          });
+        }
+      }
+      
+      hasMore = batch.has_more;
+      if (batch.data.length > 0) startingAfter = batch.data[batch.data.length - 1].id;
+    }
+
+    console.log(`[saas] list-shops: ${allCustomers.length} boutiques trouvées`);
+    res.json({ ok: true, shops: allCustomers });
+  } catch (e) {
+    console.error('[saas] list-shops:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post('/update-shop', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { password, shopId, updates } = req.body || {};
+  if (password !== config.adminPassword) {
+    return res.status(401).json({ error: 'invalid_password' });
+  }
+  if (!shopId || !updates) {
+    return res.status(400).json({ error: 'missing_data' });
+  }
+
+  try {
+    const customer = await stripe.customers.retrieve(shopId);
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
+
+    const metadataUpdates = {};
+    if (updates.phone !== undefined) metadataUpdates.boutiquePhone = updates.phone;
+    if (updates.email !== undefined) metadataUpdates.boutiqueEmail = updates.email;
+    if (updates.address !== undefined) metadataUpdates.boutiqueAddress = updates.address;
+    if (updates.city !== undefined) metadataUpdates.boutiqueCity = updates.city;
+    if (updates.siret !== undefined) metadataUpdates.boutiqueSiret = updates.siret;
+    if (updates.notes !== undefined) metadataUpdates.adminNotes = updates.notes;
+
+    await stripe.customers.update(shopId, { metadata: metadataUpdates });
+
+    console.log(`[saas] update-shop: ${customer.metadata.boutiqueName} mis à jour`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[saas] update-shop:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
