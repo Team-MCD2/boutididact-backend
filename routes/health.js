@@ -10,10 +10,16 @@ const config = require('../config/env');
 const router = express.Router();
 
 router.get('/', async (req, res) => {
-  const [hiboutikStatus, printerOnline] = await Promise.all([
+  const [hiboutikStatus, rawPrinterOnline] = await Promise.all([
     hiboutik.ping(req.hiboutikAuth),
     printer.checkOnline(req.printerAuth),
   ]);
+
+  // Si on est sur Vercel (Cloud) et qu'on a un nom de boutique, 
+  // on considère l'imprimante "OK (Relais)" sans tester l'IP locale.
+  const isVercel = !!process.env.VERCEL;
+  const isRelay = isVercel && req.shopOverrides?.name;
+  const printerOnline = isRelay ? true : rawPrinterOnline;
 
   const ok = hiboutikStatus.ok && printerOnline;
 
