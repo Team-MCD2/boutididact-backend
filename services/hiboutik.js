@@ -76,35 +76,35 @@ const ping = async (auth = null) => {
 
 const getProducts = async (auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get('/products');
   return Array.isArray(data) ? data : [];
 };
 
 const getCategories = async (auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get('/categories');
   return Array.isArray(data) ? data : [];
 };
 
 const getStores = async (auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get('/stores');
   return Array.isArray(data) ? data : [];
 };
 
 const getUsers = async (auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get('/users');
   return Array.isArray(data) ? data : [];
 };
 
 const getPaymentTypes = async (storeId, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const targetId = storeId || config.hiboutik.storeId;
   const { data } = await client.get(`/payment_types/${targetId}`);
   return Array.isArray(data) ? data : [];
@@ -145,7 +145,7 @@ const resolveSizeId = async (productId, auth = null) => {
 
 const getProductImages = async (productId, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get(`/products_images/${productId}`);
   return Array.isArray(data) ? data : [];
 };
@@ -171,7 +171,7 @@ let defaultTaxIdCache = null;
 
 const getTaxes = async (auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const { data } = await client.get('/taxes');
   return Array.isArray(data) ? data : [];
 };
@@ -196,7 +196,7 @@ const getDefaultTaxId = async (auth = null) => {
 // Crée un produit Hiboutik (utilisé pour matérialiser les produits locaux IA/CRUD au moment du checkout).
 const createProduct = async ({ name, price, categoryId }, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const taxId = await getDefaultTaxId(auth);
   const payload = {
     product_model: String(name || 'Produit').slice(0, 90),
@@ -209,7 +209,7 @@ const createProduct = async ({ name, price, categoryId }, auth = null) => {
   try {
     const { data } = await client.post('/products', payload);
     const productId = data?.product_id ?? data?.id ?? data?.[0]?.product_id;
-    if (!productId) throw new Error('product_id absent dans réponse Hiboutik');
+    if (!productId) throw new Error('product_id absent dans réponse Boutididact');
     return Number(productId);
   } catch (e) {
     const f = formatError(e);
@@ -225,13 +225,13 @@ const getFallbackCategoryId = async (auth = null) => {
   const cats = await getCategories(auth);
   const first = Array.isArray(cats) ? cats[0] : null;
   const id = Number(first?.category_id ?? first?.id);
-  if (!id) throw new Error('Aucune catégorie Hiboutik disponible (créez-en une dans Hiboutik).');
+  if (!id) throw new Error('Aucune catégorie Boutididact disponible (créez-en une dans Boutididact).');
   return id;
 };
 
 const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' }, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   const payload = {
     vendor_id: vendorId || config.hiboutik.vendorId,
     store_id: storeId || config.hiboutik.storeId,
@@ -241,7 +241,7 @@ const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' 
   try {
     const { data } = await client.post('/sales', payload);
     const saleId = data?.sale_id ?? data?.id ?? data?.[0]?.sale_id;
-    if (!saleId) throw new Error('sale_id absent dans la réponse Hiboutik');
+    if (!saleId) throw new Error('sale_id absent dans la réponse Boutididact');
     return { saleId, raw: data };
   } catch (e) {
     const f = formatError(e);
@@ -253,7 +253,7 @@ const createSale = async ({ vendorId, storeId, customerId, currencyCode = 'EUR' 
 
 const addItem = async (saleId, { productId, quantity, sizeId, price }, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
 
   const buildPayload = (sid) => {
     const p = {
@@ -293,7 +293,7 @@ const addItem = async (saleId, { productId, quantity, sizeId, price }, auth = nu
 
 const recordPayment = async (saleId, { payment }, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   try {
     const { data } = await client.put(`/sale/${saleId}`, {
       sale_attribute: 'payment',
@@ -310,7 +310,7 @@ const recordPayment = async (saleId, { payment }, auth = null) => {
 
 const closeSale = async (saleId, auth = null) => {
   const client = buildClient(auth);
-  if (!client) throw new Error('Hiboutik non configuré');
+  if (!client) throw new Error('Boutididact non configuré');
   try {
     const { data } = await client.post('/sales/close', { sale_id: saleId });
     return data;

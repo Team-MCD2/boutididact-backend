@@ -236,7 +236,7 @@ router.get('/verify-subscription', async (req, res) => {
                 `Nom Boutique : ${meta.boutiqueName}\n` +
                 `Email Boutique : ${meta.boutiqueEmail}\n` +
                 `Mot de passe choisi : ${meta.boutiquePassword}\n\n` +
-                `→ Créez son compte Hiboutik et envoyez-lui ses identifiants par e-mail.`,
+                `→ Créez son compte Boutididact et envoyez-lui ses identifiants par e-mail.`,
         }).then(() => console.log('[saas] mail admin envoyé à:', adminRecipients)).catch(e => console.error('[saas] mail admin:', e.message)));
       }
 
@@ -248,7 +248,7 @@ router.get('/verify-subscription', async (req, res) => {
         html: `
           <div style="font-family: sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
             <h2 style="color: #4f46e5;">Bienvenue, ${meta.boutiqueName} !</h2>
-            <p>Votre abonnement est activé. Vous recevrez très prochainement un second e-mail contenant vos identifiants Hiboutik à renseigner dans la borne pour activer votre boutique.</p>
+            <p>Votre abonnement est activé. Vous recevrez très prochainement un second e-mail contenant vos identifiants Boutididact à renseigner dans la borne pour activer votre boutique.</p>
             <p>Pour vous connecter à votre borne, utilisez le <strong>nom de boutique</strong> et le <strong>mot de passe</strong> choisis lors de l'inscription.</p>
             <p>L'équipe BOUTIDIDACT</p>
           </div>`,
@@ -363,7 +363,7 @@ router.post('/delete-account', async (req, res) => {
         text: `Une boutique vient d'être supprimée.\n\n` +
               `Nom Boutique : ${boutiqueName}\n` +
               `Email : ${customerEmail}\n\n` +
-              `→ Pensez à supprimer le compte Hiboutik associé.`,
+              `→ Pensez à supprimer le compte Boutididact associé.`,
       }).catch(e => console.error('[saas] mail admin delete:', e.message));
     }
 
