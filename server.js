@@ -175,6 +175,28 @@ app.post('/api/delete-shop', (req, res) => {
   res.json({ success: true });
 });
 
+app.post('/api/create-shortcut', (req, res) => {
+  const { exec } = require('child_process');
+  const exePath = process.execPath;
+  const desktopPath = path.join(process.env.USERPROFILE, 'Desktop', 'Boutididact-Print.lnk');
+  
+  // Script PowerShell avec simple quotes pour éviter les conflits avec le wrapper de commande
+  const psScript = `
+    $s = (New-Object -COM WScript.Shell).CreateShortcut('${desktopPath}');
+    $s.TargetPath = '${exePath}';
+    $s.WorkingDirectory = '${path.dirname(exePath)}';
+    $s.Save();
+  `.replace(/\n/g, ' ').trim();
+
+  exec(`powershell -Command "${psScript}"`, (err) => {
+    if (err) {
+      console.error('[shortcut] Erreur creation:', err);
+      return res.status(500).json({ error: 'Impossible de créer le raccourci.' });
+    }
+    res.json({ success: true, message: 'Raccourci créé sur le Bureau !' });
+  });
+});
+
 app.get('/', (req, res) => {
   const localIp = getLocalIp();
   // Injection sécurisée pour éviter les erreurs de syntaxe JS
@@ -255,6 +277,10 @@ app.get('/', (req, res) => {
             IP de cet ordinateur : <code style="color: #fbbf24;">${localIp}</code><br>
             Multi-boutiques : <span id="shopCount">0</span> configurée(s)
           </p>
+
+          <button onclick="createShortcut()" style="background: transparent; color: #fbbf24; border: 1px solid #fbbf24; font-size: 0.7rem; margin-top: 1rem; padding: 0.5rem; width: auto; display: inline-block;">
+            Créer un raccourci sur le Bureau
+          </button>
         </div>
 
         <script>
@@ -353,6 +379,17 @@ app.get('/', (req, res) => {
               msg.style.display = 'block';
             } finally {
               btn.disabled = false;
+            }
+          }
+
+          async function createShortcut() {
+            try {
+              const res = await fetch('/api/create-shortcut', { method: 'POST' });
+              const data = await res.json();
+              if (data.success) alert(data.message);
+              else alert(data.error);
+            } catch (e) {
+              alert('Erreur : ' + e.message);
             }
           }
 
