@@ -94,7 +94,7 @@ router.post('/stripe-checkout', async (req, res) => {
     return res.status(501).json({ error: 'stripe_not_configured', message: 'Clé Stripe manquante sur le serveur.' });
   }
 
-  const { boutiqueName, boutiqueEmail, boutiquePassword, boutiquePhone } = req.body || {};
+  const { boutiqueName, boutiqueEmail, boutiquePassword, boutiquePhone, boutiqueSiret, boutiqueTva, boutiqueCity } = req.body || {};
   if (!boutiqueName || !boutiqueEmail || !boutiquePassword) {
     return res.status(400).json({ error: 'missing_fields', message: 'Nom, email et mot de passe requis.' });
   }
@@ -163,6 +163,9 @@ router.post('/stripe-checkout', async (req, res) => {
         boutiqueEmail,
         boutiquePassword,
         boutiquePhone: boutiquePhone || '',
+        boutiqueSiret: boutiqueSiret || '',
+        boutiqueTva: boutiqueTva || '',
+        boutiqueCity: boutiqueCity || '',
       },
       subscription_data: {
         metadata: {
@@ -171,6 +174,9 @@ router.post('/stripe-checkout', async (req, res) => {
           boutiqueEmail,
           boutiquePassword,
           boutiquePhone: boutiquePhone || '',
+          boutiqueSiret: boutiqueSiret || '',
+          boutiqueTva: boutiqueTva || '',
+          boutiqueCity: boutiqueCity || '',
         },
       },
       mode: 'subscription',
@@ -219,6 +225,9 @@ router.get('/verify-subscription', async (req, res) => {
           boutiqueEmail: meta.boutiqueEmail || '',
           boutiquePassword: meta.boutiquePassword || '',
           boutiquePhone: meta.boutiquePhone || existing.metadata?.boutiquePhone || '',
+          boutiqueSiret: meta.boutiqueSiret || existing.metadata?.boutiqueSiret || '',
+          boutiqueTva: meta.boutiqueTva || existing.metadata?.boutiqueTva || '',
+          boutiqueCity: meta.boutiqueCity || existing.metadata?.boutiqueCity || '',
           paidAt: existing.metadata?.paidAt || new Date().toISOString(),
         },
       });
@@ -328,6 +337,9 @@ router.post('/login', async (req, res) => {
         id: customer.id,
         name: customer.metadata.boutiqueName,
         email: customer.metadata.boutiqueEmail || customer.email || '',
+        city: customer.metadata.boutiqueCity || '',
+        siret: customer.metadata.boutiqueSiret || '',
+        tva: customer.metadata.boutiqueTva || '',
         settings: customer.metadata.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null
       },
     });
@@ -716,6 +728,7 @@ router.get('/list-shops', async (req, res) => {
             address: c.metadata.boutiqueAddress || '',
             city: c.metadata.boutiqueCity || '',
             siret: c.metadata.boutiqueSiret || '',
+            tva: c.metadata.boutiqueTva || '',
           });
         }
       }
@@ -754,6 +767,7 @@ router.post('/update-shop', async (req, res) => {
     if (updates.address !== undefined) metadataUpdates.boutiqueAddress = updates.address;
     if (updates.city !== undefined) metadataUpdates.boutiqueCity = updates.city;
     if (updates.siret !== undefined) metadataUpdates.boutiqueSiret = updates.siret;
+    if (updates.tva !== undefined) metadataUpdates.boutiqueTva = updates.tva;
     if (updates.notes !== undefined) metadataUpdates.adminNotes = updates.notes;
 
     await stripe.customers.update(shopId, { metadata: metadataUpdates });
