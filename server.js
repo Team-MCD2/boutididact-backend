@@ -24,7 +24,7 @@ app.use((req, res, next) => {
   req.hiboutikAuth = {
     account: req.headers['x-hiboutik-account'],
     user: req.headers['x-hiboutik-user'],
-    apiKey: req.headers['x-hiboutik-key'],
+    apiKey: req.headers['x-hiboutik-api-key'], // Fix: match frontend header name
   };
   next();
 });
