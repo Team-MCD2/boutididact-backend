@@ -846,15 +846,21 @@ router.get('/get-catalog', async (req, res) => {
       fullJson += (customer.metadata[`cat_${i}`] || '');
     }
 
-    const catalog = JSON.parse(fullJson);
-    console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits, ${(catalog.supplements || []).length} suppléments)`);
-    res.json({ 
-      products: catalog.products || [], 
-      categories: catalog.categories || [],
-      supplements: catalog.supplements || []
-    });
+    try {
+      if (!fullJson) throw new Error('empty_catalog');
+      const catalog = JSON.parse(fullJson);
+      console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits)`);
+      res.json({ 
+        products: catalog.products || [], 
+        categories: catalog.categories || [],
+        supplements: catalog.supplements || []
+      });
+    } catch (e) {
+      console.warn(`[saas] Catalogue corrompu pour ${shopName}:`, e.message);
+      res.json({ products: [], categories: [], supplements: [] });
+    }
   } catch (e) {
-    console.error('[saas] get-catalog:', e.message);
+    console.error('[saas] get-catalog error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
