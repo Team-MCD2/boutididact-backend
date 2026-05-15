@@ -273,6 +273,25 @@ router.get('/verify-subscription', async (req, res) => {
 });
 
 // ============================================================
+// CHECK SHOP : Vérifie si la boutique existe (utilisé par le relais)
+// ============================================================
+router.get('/check-shop', async (req, res) => {
+  const stripe = getStripe();
+  const { shopName } = req.query;
+  if (!stripe || !shopName) return res.status(400).json({ ok: false });
+
+  try {
+    const shop = await findShopByName(stripe, shopName);
+    if (shop && shop.metadata?.paidAt) {
+      return res.json({ ok: true, name: shop.metadata.boutiqueName });
+    }
+    res.status(404).json({ ok: false, message: 'Boutique non trouvée ou non activée.' });
+  } catch (e) {
+    res.status(500).json({ ok: false, message: e.message });
+  }
+});
+
+// ============================================================
 // LOGIN : nom de boutique + mot de passe (vérifié contre metadata Stripe)
 // ============================================================
 router.post('/login', async (req, res) => {
