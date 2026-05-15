@@ -464,7 +464,7 @@ async function extractWithGroq({ imageBase64, mimeType }) {
     ? imageBase64
     : `data:${mimeType};base64,${imageBase64}`;
   const payload = {
-    model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+    model: 'llama-3.2-11b-vision-preview',
     messages: [{
       role: 'user',
       content: [
@@ -569,9 +569,48 @@ router.get('/get-settings', async (req, res) => {
   }
 });
 
-// ============================================================
-// RELAY MODE : Impression sans Ngrok (via file d'attente Stripe)
-// ============================================================
+// Test d'impression réel (simule une commande pour tester le relais)
+router.post('/test-print', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopName } = req.body || {};
+  if (!shopName) return res.status(400).json({ error: 'missing_shopName' });
+
+  try {
+    const customer = await findShopByName(stripe, shopName);
+    if (!customer) return res.status(404).json({ error: 'shop_not_found' });
+
+    const ticketData = {
+      ticketId: `TEST-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      shopName: shopName,
+      isTest: true,
+      items: [{ name: 'TEST LIAISON RELAIS', price: 0, quantity: 1 }],
+      total: 0,
+      notes: "BOUTIDIDACT - liaison OK\nTest d'impression reussi !"
+    };
+
+    const fullJson = JSON.stringify(ticketData);
+    const CHUNK_SIZE = 450;
+    const metadataUpdates = { tk_id: ticketData.ticketId };
+    
+    // Nettoyage et découpage
+    for(let i=1; i<=10; i++) metadataUpdates[`tk_${i}`] = '';
+    for (let i = 0; i < fullJson.length; i += CHUNK_SIZE) {
+      const part = Math.floor(i / CHUNK_SIZE) + 1;
+      if (part > 10) break;
+      metadataUpdates[`tk_${part}`] = fullJson.substring(i, i + CHUNK_SIZE);
+    }
+
+    await stripe.customers.update(customer.id, { metadata: metadataUpdates });
+    console.log(`[saas] Test-print envoye pour ${shopName}`);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[saas] test-print error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 // La tablette pousse le ticket ici
 router.post('/push-ticket', async (req, res) => {
