@@ -1,5 +1,5 @@
 /**
- * BOUTIDIDACT — Backend-for-Frontend
+ * BOUTIDIDACT — Backend-for-Frontend (v2.0.1)
  */
 const fs = require('fs');
 const path = require('path');
