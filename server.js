@@ -19,6 +19,13 @@ app.use((req, res, next) => {
   if (req.url !== '/api/health' && !req.url.includes('poll-ticket')) {
     console.log(`[http] ${req.method} ${req.url}`);
   }
+  
+  // Extraction des headers Hiboutik pour les routes SaaS/Relais
+  req.hiboutikAuth = {
+    account: req.headers['x-hiboutik-account'],
+    user: req.headers['x-hiboutik-user'],
+    apiKey: req.headers['x-hiboutik-key'],
+  };
   next();
 });
 
