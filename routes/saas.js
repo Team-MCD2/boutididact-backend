@@ -828,39 +828,34 @@ router.post('/save-catalog', async (req, res) => {
 });
 
 router.get('/get-catalog', async (req, res) => {
+  const stripe = getStripe();
+  if (!stripe) return res.status(501).json({ error: 'stripe_not_configured' });
+
+  const { shopId, shopName } = req.query;
+  if (!shopId && !shopName) return res.status(400).json({ error: 'missing_identifier' });
+
   try {
-    const stripe = getStripe();
-    if (!stripe) return res.json({ products: [], categories: [], supplements: [] });
-
-    const { shopId, shopName } = req.query;
-    if (!shopId && !shopName) return res.json({ products: [], categories: [], supplements: [] });
-
     const customer = shopId ? await stripe.customers.retrieve(shopId) : await findShopByName(stripe, shopName);
-    if (!customer || customer.deleted) return res.json({ products: [], categories: [], supplements: [] });
+    if (!customer || customer.deleted) return res.status(404).json({ error: 'shop_not_found' });
 
     const count = parseInt(customer.metadata?.cat_count || '0');
-    if (count === 0) return res.json({ products: [], categories: [], supplements: [] });
+    if (count === 0) return res.json({ products: [], categories: [] });
 
     let fullJson = '';
     for (let i = 1; i <= count; i++) {
       fullJson += (customer.metadata[`cat_${i}`] || '');
     }
 
-    try {
-      if (!fullJson) throw new Error('empty_catalog');
-      const catalog = JSON.parse(fullJson);
-      res.json({ 
-        products: catalog.products || [], 
-        categories: catalog.categories || [],
-        supplements: catalog.supplements || []
-      });
-    } catch (e) {
-      res.json({ products: [], categories: [], supplements: [] });
-    }
+    const catalog = JSON.parse(fullJson);
+    console.log(`[saas] Catalogue récupéré pour ${shopName} (${(catalog.products || []).length} produits, ${(catalog.supplements || []).length} suppléments)`);
+    res.json({ 
+      products: catalog.products || [], 
+      categories: catalog.categories || [],
+      supplements: catalog.supplements || []
+    });
   } catch (e) {
-    console.error('[saas] get-catalog fatal error:', e.message);
-    // On renvoie 200 avec catalogue vide au lieu de 500 pour éviter de bloquer le CORS
-    res.json({ products: [], categories: [], supplements: [] });
+    console.error('[saas] get-catalog:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

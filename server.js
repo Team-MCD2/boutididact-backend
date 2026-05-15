@@ -11,31 +11,14 @@ const config = require('./config/env');
 const { getLocalIp } = require('./services/printer');
 
 const app = express();
-
-// ---- CORS & PREFLIGHT (CRITICAL: MUST BE AT TOP) ----
+app.use(express.json());
 app.use(cors());
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, X-Hiboutik-Account, X-Hiboutik-User, X-Hiboutik-Api-Key');
-  res.status(200).end();
-});
 
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
-
-// ---- Middleware Hiboutik Auth ----
+// ---- Middleware Logging ----
 app.use((req, res, next) => {
   if (req.url !== '/api/health' && !req.url.includes('poll-ticket')) {
     console.log(`[http] ${req.method} ${req.url}`);
   }
-  
-  // Extraction des headers Hiboutik pour les routes SaaS/Relais
-  req.hiboutikAuth = {
-    account: req.headers['x-hiboutik-account'],
-    user: req.headers['x-hiboutik-user'],
-    apiKey: req.headers['x-hiboutik-api-key'], // Fix: match frontend header name
-  };
   next();
 });
 
@@ -143,69 +126,6 @@ app.post('/api/delete-shop', (req, res) => {
 app.post('/api/stop-relay', (req, res) => {
   stopRelayPolling();
   res.json({ success: true });
-});
-
-app.post('/api/test-print', async (req, res) => {
-  const shop = localSettings.shops.find(s => s.shopName === localSettings.activeShop);
-  if (!shop) return res.status(400).json({ error: 'Aucune boutique active' });
-
-  const ip = shop.printerIp;
-  const port = shop.printerPort || '9100';
-
-  // On reproduit exactement le contenu de jbjk dynamiquement
-  const psScript = `
-    $client = New-Object System.Net.Sockets.TcpClient("${ip}", ${port})
-    $stream = $client.GetStream()
-    $ESC = [char]27; $GS = [char]29; $LF = [char]10; $NUL = [char]0
-    $payload = "$ESC@"
-    $payload += "TEST-TEST-TEST-TEST-TEST-TEST-TEST-TEST-TEST-TEST"
-    $payload += "BOUTIDIDACT - liaison OK$LF$LF$LF$LF$LF"
-    $payload += "$GS" + "V" + "$NUL"
-    $bytes = [Text.Encoding]::ASCII.GetBytes($payload)
-    $stream.Write($bytes, 0, $bytes.Length)
-    $stream.Flush()
-    Start-Sleep -Milliseconds 800
-    $stream.Close(); $client.Close()
-  `;
-
-  const encoded = Buffer.from(psScript, 'utf16le').toString('base64');
-  exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err) => {
-    if (err) {
-      console.error('[test] Erreur:', err.message);
-      return res.status(500).json({ success: false, error: 'Connexion échouée' });
-    }
-    res.json({ success: true, message: 'Ticket de test envoyé !' });
-  });
-});
-
-app.post('/api/test-printer', async (req, res) => {
-  const { printerIp, printerPort } = req.body;
-  if (!printerIp) return res.status(400).json({ error: 'IP manquante' });
-  
-  console.log(`[printer] TEST DE CONNEXION vers ${printerIp}:${printerPort || 9100}`);
-  const printer = require('./services/printer');
-  
-  // On utilise la logique du fichier jbjk adaptée pour Node.js
-  const testTicket = {
-    ticketId: 'TEST-' + Date.now(),
-    items: [{ name: 'BOUTIDIDACT - liaison OK', quantity: 1, price: 0 }],
-    total: 0,
-    paidAt: new Date().toISOString(),
-    shopName: 'TEST LIAISON'
-  };
-
-  try {
-    await printer.printTicket(testTicket, { 
-      ip: printerIp, 
-      port: printerPort || '9100', 
-      type: 'escpos', 
-      width: 32 
-    });
-    res.json({ success: true, message: 'Ticket de test envoyé !' });
-  } catch (e) {
-    console.error('[printer] Echec du test:', e.message);
-    res.status(502).json({ error: `Erreur : ${e.message}. Verifiez l'IP et que l'imprimante est allumée.` });
-  }
 });
 
 app.post('/api/shutdown', (req, res) => {
