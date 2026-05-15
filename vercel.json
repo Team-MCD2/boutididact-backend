@@ -6,6 +6,17 @@
       "use": "@vercel/node"
     }
   ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Credentials", "value": "true" },
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
+        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, X-Hiboutik-Account, X-Hiboutik-User, X-Hiboutik-Api-Key, X-Hiboutik-Store-Id, X-Hiboutik-Vendor-Id, X-Shop-Name, X-Shop-Address, X-Shop-Siret, X-Shop-Tva, X-Printer-Ip, X-Printer-Port" }
+      ]
+    }
+  ],
   "routes": [
     {
       "src": "/api/(.*)",
