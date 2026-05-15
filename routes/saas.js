@@ -7,11 +7,7 @@ const router = express.Router();
 
 // ============================================================
 // Persistance : Stripe Customer metadata (compatible Vercel).
-//   - boutiqueName  (case sensitive, recherchable via Search API)
-//   - boutiqueNameLower (lowercase pour recherche insensible à la casse)
-//   - boutiquePassword
-//   - paidAt
-// Aucun fichier sur disque -> fonctionne en serverless.
+// Last update: 2026-05-15 19:48
 // ============================================================
 
 const getStripe = () => {
