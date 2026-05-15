@@ -11,8 +11,24 @@ const config = require('./config/env');
 const { getLocalIp } = require('./services/printer');
 
 const app = express();
-app.use(express.json({ limit: '10mb' })); // Augmentation de la limite pour les photos de menus
-app.use(cors()); // Accepte toutes les origines par défaut
+app.use(express.json({ limit: '10mb' }));
+
+// Configuration CORS Ultra-Permissive pour Multi-Tenant
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 'Authorization', 'X-Requested-With',
+    'X-Hiboutik-Account', 'X-Hiboutik-User', 'X-Hiboutik-Api-Key', 
+    'X-Hiboutik-Store-Id', 'X-Hiboutik-Vendor-Id',
+    'X-Shop-Name', 'X-Shop-Address', 'X-Shop-Siret', 'X-Shop-Tva',
+    'X-Printer-Ip', 'X-Printer-Port'
+  ],
+  credentials: true
+}));
+
+// Support explicite des requêtes OPTIONS (pre-flight)
+app.options('*', cors());
 
 // ---- Middleware Logging ----
 app.use((req, res, next) => {
