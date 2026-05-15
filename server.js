@@ -180,15 +180,15 @@ app.post('/api/create-shortcut', (req, res) => {
   const exePath = process.execPath;
   const desktopPath = path.join(process.env.USERPROFILE, 'Desktop', 'Boutididact-Print.lnk');
   
-  // Script PowerShell avec simple quotes pour éviter les conflits avec le wrapper de commande
-  const psScript = `
-    $s = (New-Object -COM WScript.Shell).CreateShortcut('${desktopPath}');
-    $s.TargetPath = '${exePath}';
-    $s.WorkingDirectory = '${path.dirname(exePath)}';
+  const script = `
+    $s = (New-Object -COM WScript.Shell).CreateShortcut("${desktopPath}");
+    $s.TargetPath = "${exePath}";
+    $s.WorkingDirectory = "${path.dirname(exePath)}";
     $s.Save();
-  `.replace(/\n/g, ' ').trim();
+  `;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
 
-  exec(`powershell -Command "${psScript}"`, (err) => {
+  exec(`powershell -NoProfile -EncodedCommand ${encoded}`, (err) => {
     if (err) {
       console.error('[shortcut] Erreur creation:', err);
       return res.status(500).json({ error: 'Impossible de créer le raccourci.' });
