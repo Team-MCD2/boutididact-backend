@@ -31,7 +31,7 @@ const normalizeCategory = (c) => ({
   parentId: c.parent_category_id ?? null,
 });
 
-router.get('/products', async (req, res) => {
+router.get('/products*', async (req, res) => {
   if (!hiboutik.isConfigured(req.hiboutikAuth)) {
     return res.status(503).json({
       error: 'hiboutik_not_configured',
@@ -52,7 +52,7 @@ router.get('/products', async (req, res) => {
   }
 });
 
-router.get('/categories', async (req, res) => {
+router.get('/categories*', async (req, res) => {
   if (!hiboutik.isConfigured(req.hiboutikAuth)) {
     return res.status(503).json({ error: 'hiboutik_not_configured' });
   }
