@@ -69,17 +69,30 @@ function saveSettings() {
 }
 
 // ---- Endpoints Relais ----
-app.post('/api/local-config', (req, res) => {
+app.post('/api/local-config', async (req, res) => {
   const { shopName, printerIp, printerPort, cloudUrl } = req.body;
   if (!shopName || !printerIp) return res.status(400).json({ error: 'Champs manquants' });
   
+  const targetCloud = cloudUrl || 'https://boutididact-backendd.vercel.app';
+
+  // Vérification de l'existence de la boutique sur le Cloud
+  try {
+    await axios.get(`${targetCloud}/api/saas/poll-ticket?shopName=${encodeURIComponent(shopName)}`, { timeout: 5000 });
+  } catch (e) {
+    if (e.response && e.response.status === 404) {
+      return res.status(404).json({ error: `Boutique introuvable : "${shopName}" n'existe pas.` });
+    }
+    // Si erreur réseau (timeout), on laisse passer car le cloud est peut-être juste lent
+    console.warn(`[config] Impossible de verifier ${shopName} :`, e.message);
+  }
+
   const existing = localSettings.shops.find(s => s.shopName === shopName);
   if (existing) {
     existing.printerIp = printerIp;
     existing.printerPort = printerPort || '9100';
-    existing.cloudUrl = cloudUrl || 'https://boutididact-backendd.vercel.app';
+    existing.cloudUrl = targetCloud;
   } else {
-    localSettings.shops.push({ shopName, printerIp, printerPort: printerPort || '9100', cloudUrl: cloudUrl || 'https://boutididact-backendd.vercel.app' });
+    localSettings.shops.push({ shopName, printerIp, printerPort: printerPort || '9100', cloudUrl: targetCloud });
   }
   localSettings.activeShop = shopName;
   saveSettings();
@@ -197,7 +210,7 @@ app.get('/', async (req, res) => {
             <button onclick="showAdd()" class="btn-secondary" style="font-size:0.7rem; padding:5px;">+ Ajouter une autre boutique</button>
           </div>
 
-          <div id="addForm" style="display:none; margin-top:20px; border-top:1px solid #334155; padding-top:20px;">
+          <div id="addForm" style="margin-top:20px; border-top:1px solid #334155; padding-top:20px;">
             <div class="form-group">
               <label>Nom de la boutique</label>
               <input type="text" id="newName" placeholder="ex: MaBoutique">
@@ -206,8 +219,8 @@ app.get('/', async (req, res) => {
               <label>IP Imprimante</label>
               <input type="text" id="newIp" placeholder="192.168.1.100">
             </div>
-            <button onclick="doAdd()">Valider et Ajouter</button>
-            <button id="cancelBtn" onclick="hideAdd()" class="btn-secondary">Annuler</button>
+            <button id="addBtn" onclick="doAdd()">Valider et Ajouter</button>
+            <button id="cancelBtn" onclick="hideAdd()" class="btn-secondary" style="display:none;">Annuler</button>
           </div>
 
           <div class="footer">
@@ -218,13 +231,18 @@ app.get('/', async (req, res) => {
         </div>
 
         <script>
-          const data = ${JSON.stringify(localSettings)};
+          const data = ${JSON.stringify(localSettings)} || { shops: [], activeShop: '' };
+          window.isAdding = false;
           
           function refresh() {
-            const hasShops = data.shops.length > 0;
-            document.getElementById('shopManager').style.display = (hasShops && !window.isAdding) ? 'block' : 'none';
-            document.getElementById('addForm').style.display = (!hasShops || window.isAdding) ? 'block' : 'none';
-            document.getElementById('cancelBtn').style.display = hasShops ? 'block' : 'none';
+            const hasShops = data.shops && data.shops.length > 0;
+            const shopManager = document.getElementById('shopManager');
+            const addForm = document.getElementById('addForm');
+            const cancelBtn = document.getElementById('cancelBtn');
+
+            if (shopManager) shopManager.style.display = (hasShops && !window.isAdding) ? 'block' : 'none';
+            if (addForm) addForm.style.display = (!hasShops || window.isAdding) ? 'block' : 'none';
+            if (cancelBtn) cancelBtn.style.display = hasShops ? 'block' : 'none';
             
             const sel = document.getElementById('shopSelector');
             sel.innerHTML = data.shops.map(s => '<option value="'+s.shopName+'" '+(s.shopName===data.activeShop?'selected':'')+'>'+s.shopName+'</option>').join('');
@@ -256,8 +274,30 @@ app.get('/', async (req, res) => {
             const name = document.getElementById('newName').value.trim();
             const ip = document.getElementById('newIp').value.trim();
             if (!name || !ip) return alert('Remplissez tout');
-            await api('/api/local-config', { shopName: name, printerIp: ip });
-            window.location.reload();
+            
+            const btn = document.getElementById('addBtn');
+            const oldText = btn.innerText;
+            btn.innerText = 'Vérification...';
+            btn.disabled = true;
+
+            try {
+              const res = await fetch('/api/local-config', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ shopName: name, printerIp: ip }) 
+              });
+              const data = await res.json();
+              if (data.success) {
+                window.location.reload();
+              } else {
+                alert(data.error || "Impossible d'ajouter cette boutique");
+              }
+            } catch (e) {
+              alert('Erreur de connexion au serveur local');
+            } finally {
+              btn.innerText = oldText;
+              btn.disabled = false;
+            }
           }
 
           async function doSwitch() {
@@ -268,7 +308,7 @@ app.get('/', async (req, res) => {
 
           async function doDelete() {
             const name = document.getElementById('shopSelector').value;
-            if (!confirm('Supprimer ' + name + ' ?')) return;
+            if (!confirm("Supprimer " + name + " ?")) return;
             await api('/api/delete-shop', { shopName: name });
             window.location.reload();
           }
@@ -288,7 +328,7 @@ app.get('/', async (req, res) => {
           }
 
           function doQuit() {
-            if (!confirm('Quitter ?')) return;
+            if (!confirm("Quitter ?")) return;
             api('/api/shutdown', {});
             document.body.innerHTML = '<h1>Serveur ferme</h1>';
           }
