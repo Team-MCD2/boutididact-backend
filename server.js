@@ -11,16 +11,20 @@ const config = require('./config/env');
 const { getLocalIp } = require('./services/printer');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
-app.use(cors());
 
-// ---- Preflight Options ----
+// ---- CORS & PREFLIGHT (CRITICAL: MUST BE AT TOP) ----
+app.use(cors());
 app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, X-Hiboutik-Account, X-Hiboutik-User, X-Hiboutik-Api-Key');
   res.status(200).end();
 });
 
-// ---- Middleware Logging ----
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// ---- Middleware Hiboutik Auth ----
 app.use((req, res, next) => {
   if (req.url !== '/api/health' && !req.url.includes('poll-ticket')) {
     console.log(`[http] ${req.method} ${req.url}`);
