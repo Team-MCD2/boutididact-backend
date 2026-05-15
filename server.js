@@ -19,6 +19,14 @@ app.use((req, res, next) => {
   if (req.url !== '/api/health' && !req.url.includes('poll-ticket')) {
     console.log(`[http] ${req.method} ${req.url}`);
   }
+  
+  // Extraction des identifiants Hiboutik (Multi-tenant)
+  req.hiboutikAuth = {
+    account: req.headers['x-hiboutik-account'],
+    user: req.headers['x-hiboutik-user'],
+    apiKey: req.headers['x-hiboutik-api-key'],
+  };
+  
   next();
 });
 
