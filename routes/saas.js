@@ -94,7 +94,7 @@ router.post('/stripe-checkout', async (req, res) => {
     return res.status(501).json({ error: 'stripe_not_configured', message: 'Clé Stripe manquante sur le serveur.' });
   }
 
-  const { boutiqueName, boutiqueEmail, boutiquePassword, boutiquePhone, boutiqueSiret, boutiqueTva, boutiqueCity } = req.body || {};
+  const { boutiqueName, boutiqueEmail, boutiquePassword, boutiquePhone, boutiqueSiret, boutiqueTva, boutiqueCity, boutiqueAddress } = req.body || {};
   if (!boutiqueName || !boutiqueEmail || !boutiquePassword) {
     return res.status(400).json({ error: 'missing_fields', message: 'Nom, email et mot de passe requis.' });
   }
@@ -166,6 +166,7 @@ router.post('/stripe-checkout', async (req, res) => {
         boutiqueSiret: boutiqueSiret || '',
         boutiqueTva: boutiqueTva || '',
         boutiqueCity: boutiqueCity || '',
+        boutiqueAddress: boutiqueAddress || '',
       },
       subscription_data: {
         metadata: {
@@ -177,6 +178,7 @@ router.post('/stripe-checkout', async (req, res) => {
           boutiqueSiret: boutiqueSiret || '',
           boutiqueTva: boutiqueTva || '',
           boutiqueCity: boutiqueCity || '',
+          boutiqueAddress: boutiqueAddress || '',
         },
       },
       mode: 'subscription',
@@ -228,6 +230,7 @@ router.get('/verify-subscription', async (req, res) => {
           boutiqueSiret: meta.boutiqueSiret || existing.metadata?.boutiqueSiret || '',
           boutiqueTva: meta.boutiqueTva || existing.metadata?.boutiqueTva || '',
           boutiqueCity: meta.boutiqueCity || existing.metadata?.boutiqueCity || '',
+          boutiqueAddress: meta.boutiqueAddress || existing.metadata?.boutiqueAddress || '',
           paidAt: existing.metadata?.paidAt || new Date().toISOString(),
         },
       });
@@ -338,6 +341,7 @@ router.post('/login', async (req, res) => {
         name: customer.metadata.boutiqueName,
         email: customer.metadata.boutiqueEmail || customer.email || '',
         city: customer.metadata.boutiqueCity || '',
+        address: customer.metadata.boutiqueAddress || '',
         siret: customer.metadata.boutiqueSiret || '',
         tva: customer.metadata.boutiqueTva || '',
         settings: customer.metadata.shopSettings ? JSON.parse(customer.metadata.shopSettings) : null
